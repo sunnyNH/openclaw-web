@@ -71,6 +71,8 @@ const sessionsUsageResult = ref<SessionsUsageResult | null>(null)
 const usageCostSummary = ref<CostUsageSummary | null>(null)
 
 let cleanupEvents: (() => void) | null = null
+let cleanupStateChange: (() => void) | null = null
+let retryAfterFirstConnect = false
 
 const ZERO_USAGE_TOTALS: SessionsUsageTotals = {
   input: 0,
@@ -417,7 +419,13 @@ const sessionColumns = [
 
 onMounted(async () => {
   applyRangePreset('7d', false)
+  retryAfterFirstConnect = wsStore.state !== 'connected'
+
+  cleanupStateChange = wsStore.subscribe('stateChange', () => {
+    maybeRetryAfterConnect()
+  })
   await refreshDashboard()
+  maybeRetryAfterConnect()
 
   cleanupEvents = wsStore.subscribe('event', (evt: unknown) => {
     const event = evt as { event: string; payload: unknown; seq?: number }
@@ -434,9 +442,20 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  cleanupStateChange?.()
+  cleanupStateChange = null
   cleanupEvents?.()
   cleanupEvents = null
 })
+
+function maybeRetryAfterConnect() {
+  if (!retryAfterFirstConnect) return
+  if (wsStore.state !== 'connected') return
+  if (refreshing.value) return
+
+  retryAfterFirstConnect = false
+  void refreshDashboard()
+}
 
 async function refreshDashboard() {
   if (refreshing.value) return
