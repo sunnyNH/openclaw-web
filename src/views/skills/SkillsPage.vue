@@ -101,10 +101,10 @@ const pluginGroups = computed(() => [
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="技能管理（我的插件）" style="border-radius: var(--radius-lg);">
+    <NCard title="技能管理（我的插件）" class="app-card">
       <template #header-extra>
-        <NSpace :size="8">
-          <NButton size="small" @click="skillStore.fetchSkills()">
+        <NSpace :size="8" class="app-toolbar">
+          <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="skillStore.fetchSkills()">
             <template #icon><NIcon :component="RefreshOutline" /></template>
             刷新
           </NButton>

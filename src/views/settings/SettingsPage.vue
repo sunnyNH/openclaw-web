@@ -105,7 +105,7 @@ function handleThemeChange(mode: ThemeMode) {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="连接设置" style="border-radius: var(--radius-lg);">
+    <NCard title="连接设置" class="app-card">
       <NAlert :type="connectionStatus.type" :bordered="false" style="margin-bottom: 16px;">
         当前状态：{{ connectionStatus.text }}
         <span v-if="wsStore.lastError">（{{ wsStore.lastError }}）</span>
@@ -127,7 +127,7 @@ function handleThemeChange(mode: ThemeMode) {
       </NForm>
     </NCard>
 
-    <NCard title="外观设置" style="border-radius: var(--radius-lg);">
+    <NCard title="外观设置" class="app-card">
       <NForm label-placement="left" label-width="120" style="max-width: 500px;">
         <NFormItem label="主题模式">
           <NSelect
@@ -139,7 +139,7 @@ function handleThemeChange(mode: ThemeMode) {
       </NForm>
     </NCard>
 
-    <NCard title="关于" style="border-radius: var(--radius-lg);">
+    <NCard title="关于" class="app-card">
       <NSpace vertical :size="8">
         <NText>OpenClaw Admin v0.1.0</NText>
         <NText depth="3" style="font-size: 13px;">

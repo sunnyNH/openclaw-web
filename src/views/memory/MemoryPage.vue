@@ -25,6 +25,7 @@ import {
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { formatDate } from '@/utils/format'
+import { renderSimpleMarkdown } from '@/utils/markdown'
 import { useMemoryStore } from '@/stores/memory'
 
 type DocGroupKey = 'role' | 'runtime' | 'memory' | 'other'
@@ -211,7 +212,11 @@ const activeDoc = computed<DocEntry | null>(() => {
 const hasUnsavedChanges = computed(() => editorContent.value !== memoryStore.currentContent)
 const charCount = computed(() => editorContent.value.length)
 const lineCount = computed(() => (editorContent.value ? editorContent.value.split(/\r?\n/).length : 0))
-const previewHtml = computed(() => renderSimpleMarkdown(memoryStore.currentContent || ''))
+const previewHtml = computed(() =>
+  renderSimpleMarkdown(memoryStore.currentContent || '', {
+    emptyHtml: '<p class="memory-markdown-empty">当前文件为空，点击“编辑文档”开始维护内容。</p>',
+  })
+)
 
 const fileStateLabel = computed(() => {
   if (!activeFile.value) return '未加载'
@@ -319,153 +324,6 @@ onMounted(async () => {
     message.warning(error instanceof Error ? error.message : '记忆模块初始化失败')
   }
 })
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function renderInlineMarkdown(value: string): string {
-  return value
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-    .replace(/`([^`\n]+?)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
-}
-
-function renderSimpleMarkdown(markdown: string): string {
-  const normalized = markdown.replace(/\r\n/g, '\n')
-  if (!normalized.trim()) {
-    return '<p class="memory-markdown-empty">当前文件为空，点击“编辑文档”开始维护内容。</p>'
-  }
-
-  const codeBlocks: string[] = []
-  const source = normalized.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_raw, lang: string, code: string) => {
-    const langText = lang?.trim()
-    const codeHtml = `<pre><code${langText ? ` data-lang="${escapeHtml(langText)}"` : ''}>${escapeHtml(code)}</code></pre>`
-    const token = `@@CODE_BLOCK_${codeBlocks.length}@@`
-    codeBlocks.push(codeHtml)
-    return token
-  })
-
-  const lines = source.split('\n')
-  const output: string[] = []
-  let inUnorderedList = false
-  let inOrderedList = false
-  let inBlockquote = false
-
-  const closeLists = () => {
-    if (inUnorderedList) {
-      output.push('</ul>')
-      inUnorderedList = false
-    }
-    if (inOrderedList) {
-      output.push('</ol>')
-      inOrderedList = false
-    }
-  }
-
-  const closeBlockquote = () => {
-    if (inBlockquote) {
-      output.push('</blockquote>')
-      inBlockquote = false
-    }
-  }
-
-  const closeAllBlocks = () => {
-    closeLists()
-    closeBlockquote()
-  }
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    const normalizedListLine = trimmed.replace(/^[•·●▪◦‣⁃]\s*/u, '- ')
-
-    if (/^@@CODE_BLOCK_\d+@@$/.test(trimmed)) {
-      closeAllBlocks()
-      output.push(trimmed)
-      continue
-    }
-
-    if (!trimmed) {
-      closeAllBlocks()
-      continue
-    }
-
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch) {
-      closeAllBlocks()
-      const headingMarks = headingMatch[1] || '#'
-      const headingText = headingMatch[2] || ''
-      const level = headingMarks.length
-      const content = renderInlineMarkdown(escapeHtml(headingText))
-      output.push(`<h${level}>${content}</h${level}>`)
-      continue
-    }
-
-    const hrSource = trimmed.replace(/\s+/g, '')
-    if (/^([-*_])\1{2,}$/.test(hrSource)) {
-      closeAllBlocks()
-      output.push('<hr />')
-      continue
-    }
-
-    const quoteMatch = trimmed.match(/^>\s?(.*)$/)
-    if (quoteMatch) {
-      closeLists()
-      if (!inBlockquote) {
-        output.push('<blockquote>')
-        inBlockquote = true
-      }
-      const quoteText = quoteMatch[1] || ''
-      output.push(`<p>${renderInlineMarkdown(escapeHtml(quoteText))}</p>`)
-      continue
-    }
-    closeBlockquote()
-
-    const unorderedMatch = normalizedListLine.match(/^[-*+]\s*(.+)$/)
-    if (unorderedMatch) {
-      if (inOrderedList) {
-        output.push('</ol>')
-        inOrderedList = false
-      }
-      if (!inUnorderedList) {
-        output.push('<ul>')
-        inUnorderedList = true
-      }
-      const unorderedText = unorderedMatch[1] || ''
-      output.push(`<li>${renderInlineMarkdown(escapeHtml(unorderedText))}</li>`)
-      continue
-    }
-
-    const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/)
-    if (orderedMatch) {
-      if (inUnorderedList) {
-        output.push('</ul>')
-        inUnorderedList = false
-      }
-      if (!inOrderedList) {
-        output.push('<ol>')
-        inOrderedList = true
-      }
-      const orderedText = orderedMatch[1] || ''
-      output.push(`<li>${renderInlineMarkdown(escapeHtml(orderedText))}</li>`)
-      continue
-    }
-
-    closeLists()
-    output.push(`<p>${renderInlineMarkdown(escapeHtml(trimmed))}</p>`)
-  }
-
-  closeAllBlocks()
-  return output
-    .join('\n')
-    .replace(/@@CODE_BLOCK_(\d+)@@/g, (_raw, index: string) => codeBlocks[Number(index)] || '')
-}
 
 function formatBytes(value?: number): string {
   if (!value || value <= 0) return '-'
@@ -923,128 +781,181 @@ function isActiveDoc(name: string): boolean {
   border-radius: 10px;
   padding: 14px;
   background: var(--bg-primary);
+  font-size: 13.5px;
+  line-height: 1.72;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
-.memory-markdown > :first-child {
+.memory-markdown :deep(> :first-child) {
   margin-top: 0;
 }
 
-.memory-markdown h1,
-.memory-markdown h2,
-.memory-markdown h3,
-.memory-markdown h4,
-.memory-markdown h5,
-.memory-markdown h6 {
-  margin: 14px 0 8px;
-  line-height: 1.35;
+.memory-markdown :deep(> :last-child) {
+  margin-bottom: 0;
 }
 
-.memory-markdown h1 {
-  font-size: 20px;
+/* —— 标题 —— */
+.memory-markdown :deep(h1),
+.memory-markdown :deep(h2),
+.memory-markdown :deep(h3),
+.memory-markdown :deep(h4),
+.memory-markdown :deep(h5),
+.memory-markdown :deep(h6) {
+  margin: 16px 0 4px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.memory-markdown h2 {
-  font-size: 17px;
+.memory-markdown :deep(h1) { font-size: 1.35em; }
+.memory-markdown :deep(h2) { font-size: 1.18em; }
+.memory-markdown :deep(h3) { font-size: 1.06em; }
+.memory-markdown :deep(h4) { font-size: 1em; }
+.memory-markdown :deep(h5),
+.memory-markdown :deep(h6) { font-size: 0.94em; }
+
+/* —— 段落 —— */
+.memory-markdown :deep(p) {
+  margin: 5px 0;
+  line-height: 1.72;
 }
 
-.memory-markdown h3 {
-  font-size: 15px;
-}
-
-.memory-markdown h4 {
-  font-size: 14px;
-}
-
-.memory-markdown h5,
-.memory-markdown h6 {
-  font-size: 13px;
-}
-
-.memory-markdown p {
-  margin: 6px 0;
-  line-height: 1.7;
-}
-
-.memory-markdown ul {
-  margin: 8px 0 8px 0.7em;
-  padding-left: 0;
-  list-style: none;
-  line-height: 1.7;
-}
-
-.memory-markdown ol {
-  margin: 8px 0 8px 1.35em;
-  padding-left: 1.1em;
-  list-style-position: outside;
-  line-height: 1.7;
-}
-
-.memory-markdown li {
+/* —— 无序列表 —— */
+.memory-markdown :deep(ul) {
   margin: 4px 0;
+  padding-left: 1.1em;
+  list-style: none;
 }
 
-.memory-markdown ul > li {
+.memory-markdown :deep(ul > li) {
   position: relative;
-  padding-left: 1.05em;
+  margin: 2px 0;
+  line-height: 1.72;
 }
 
-.memory-markdown ul > li::before {
-  content: '•';
+.memory-markdown :deep(ul > li::before) {
+  content: '';
   position: absolute;
-  left: 0;
-  top: 0;
-  color: var(--text-secondary);
-  font-size: 0.95em;
-  line-height: 1.7;
+  left: -0.88em;
+  top: 0.58em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--md-bullet-color);
 }
 
-.memory-markdown ol > li::marker {
-  color: var(--text-secondary);
+/* 嵌套列表 */
+.memory-markdown :deep(ul ul) {
+  margin: 1px 0 1px 0.15em;
+}
+
+.memory-markdown :deep(ul ul > li::before) {
+  width: 3.5px;
+  height: 3.5px;
+  background: transparent;
+  border: 1px solid var(--md-bullet-nested-color);
+  top: 0.62em;
+}
+
+/* 三级列表 */
+.memory-markdown :deep(ul ul ul > li::before) {
+  width: 3px;
+  height: 3px;
+  border: none;
+  background: var(--md-bullet-nested-color);
+  border-radius: 0;
+}
+
+/* —— 有序列表 —— */
+.memory-markdown :deep(ol) {
+  margin: 4px 0;
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+
+.memory-markdown :deep(ol > li) {
+  margin: 2px 0;
+  line-height: 1.72;
+}
+
+.memory-markdown :deep(ol > li::marker) {
+  color: var(--md-bullet-color);
   font-size: 0.9em;
+  font-weight: 500;
 }
 
-.memory-markdown blockquote {
-  margin: 10px 0;
-  padding: 8px 12px;
-  border-left: 3px solid var(--success-color);
-  background: rgba(24, 160, 88, 0.08);
-  border-radius: 0 6px 6px 0;
-}
-
-.memory-markdown pre {
-  margin: 10px 0;
-  padding: 12px;
-  border-radius: 8px;
-  background: rgba(16, 24, 40, 0.86);
-  color: #e8eef8;
-  overflow: auto;
-}
-
-.memory-markdown code {
-  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
-}
-
-.memory-markdown p code,
-.memory-markdown li code {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(16, 24, 40, 0.08);
-}
-
-.memory-markdown a {
-  color: var(--primary-color);
+/* —— 链接 —— */
+.memory-markdown :deep(a) {
+  color: var(--link-color);
   text-decoration: none;
+  font-weight: 500;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  transition: color 0.12s ease, text-decoration-color 0.12s ease;
+  text-decoration-line: underline;
+  text-decoration-color: var(--link-underline);
 }
 
-.memory-markdown a:hover {
-  text-decoration: underline;
+.memory-markdown :deep(a:hover) {
+  color: var(--link-color-hover);
+  text-decoration-color: var(--link-color-hover);
 }
 
-.memory-markdown hr {
+/* —— 引用块 —— */
+.memory-markdown :deep(blockquote) {
+  margin: 6px 0;
+  padding: 4px 10px;
+  border-left: 2.5px solid var(--md-blockquote-border);
+  border-radius: 0 4px 4px 0;
+  background: var(--md-blockquote-bg);
+}
+
+.memory-markdown :deep(blockquote p) {
+  margin: 2px 0;
+  color: var(--text-secondary);
+  font-size: 0.94em;
+}
+
+/* —— 代码 —— */
+.memory-markdown :deep(pre) {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-pre-bg);
+  overflow-x: auto;
+  line-height: 1.52;
+}
+
+.memory-markdown :deep(code) {
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  font-size: 0.87em;
+}
+
+.memory-markdown :deep(p code),
+.memory-markdown :deep(li code) {
+  padding: 0.5px 4.5px;
+  border-radius: 3px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-code-bg);
+}
+
+/* —— 分割线 —— */
+.memory-markdown :deep(hr) {
   border: 0;
-  border-top: 1px dashed var(--border-color);
-  margin: 12px 0;
+  height: 1px;
+  background: var(--border-color);
+  margin: 10px 0;
+}
+
+/* —— 加粗/强调 —— */
+.memory-markdown :deep(strong) {
+  font-weight: 600;
+}
+
+.memory-markdown :deep(em) {
+  font-style: italic;
 }
 
 .memory-markdown-empty {

@@ -175,18 +175,168 @@ export class RPCClient {
     return undefined
   }
 
+  private normalizeSessionChannel(channel: string): string {
+    const value = channel.trim().toLowerCase()
+    if (!value) return 'main'
+    if (value === 'qqbot') return 'qq'
+    if (value === 'feishu-china') return 'feishu'
+    if (value === 'wecom-app') return 'wecom'
+    return value
+  }
+
+  private parseSessionKeyMeta(key: string): { agentId: string; channel: string; peer: string } {
+    const raw = key.trim()
+    if (!raw) {
+      return {
+        agentId: 'main',
+        channel: 'main',
+        peer: '',
+      }
+    }
+
+    const lowered = raw.toLowerCase()
+    if (lowered === 'main') {
+      return {
+        agentId: 'main',
+        channel: 'main',
+        peer: '',
+      }
+    }
+    if (lowered === 'global') {
+      return {
+        agentId: 'main',
+        channel: 'global',
+        peer: '',
+      }
+    }
+    if (lowered === 'unknown') {
+      return {
+        agentId: 'main',
+        channel: 'unknown',
+        peer: '',
+      }
+    }
+
+    const parts = raw.split(':').filter(Boolean)
+    if (parts[0] === 'agent' && parts.length >= 3) {
+      const agentId = this.asString(parts[1], 'main')
+      const rest = parts.slice(2)
+      const head = this.asString(rest[0]).toLowerCase()
+      const second = this.asString(rest[1]).toLowerCase()
+      const third = this.asString(rest[2]).toLowerCase()
+
+      if (!head || head === 'main') {
+        return {
+          agentId,
+          channel: 'main',
+          peer: rest.slice(1).join(':'),
+        }
+      }
+
+      if (head === 'direct') {
+        return {
+          agentId,
+          channel: 'main',
+          peer: rest.slice(1).join(':'),
+        }
+      }
+
+      if (head === 'cron' || head === 'subagent' || head === 'acp') {
+        return {
+          agentId,
+          channel: head,
+          peer: rest.slice(1).join(':'),
+        }
+      }
+
+      if (second === 'direct' || second === 'group' || second === 'channel') {
+        return {
+          agentId,
+          channel: this.normalizeSessionChannel(head),
+          peer: rest.slice(2).join(':'),
+        }
+      }
+
+      if (third === 'direct' || third === 'group' || third === 'channel') {
+        return {
+          agentId,
+          channel: this.normalizeSessionChannel(head),
+          peer: rest.slice(3).join(':'),
+        }
+      }
+
+      return {
+        agentId,
+        channel: this.normalizeSessionChannel(head),
+        peer: rest.slice(1).join(':'),
+      }
+    }
+
+    if (parts[0] === 'cron') {
+      return {
+        agentId: 'main',
+        channel: 'cron',
+        peer: parts.slice(1).join(':'),
+      }
+    }
+
+    if (parts[0] === 'direct') {
+      return {
+        agentId: 'main',
+        channel: 'main',
+        peer: parts.slice(1).join(':'),
+      }
+    }
+
+    if (parts.length >= 2) {
+      return {
+        agentId: parts[0] || 'main',
+        channel: this.normalizeSessionChannel(parts[1] || 'main'),
+        peer: parts.slice(2).join(':'),
+      }
+    }
+
+    return {
+      agentId: 'main',
+      channel: 'main',
+      peer: '',
+    }
+  }
+
+  private resolveSessionChannel(params: { primary: string; fallback: string }): string {
+    const primary = this.normalizeSessionChannel(params.primary)
+    if (primary && primary !== 'unknown') return primary
+
+    const fallback = this.normalizeSessionChannel(params.fallback)
+    if (fallback) return fallback
+
+    return primary || 'main'
+  }
+
   private normalizeSessionItem(value: unknown): Session {
     const row = this.asRecord(value)
     const key = this.asString(row.key || row.sessionKey || row.id)
+    const parsed = this.parseSessionKeyMeta(key)
+    const deliveryContext = this.asRecord(row.deliveryContext)
+    const deliveryChannel = this.asString(
+      deliveryContext.channel || deliveryContext.provider || deliveryContext.surface
+    )
+    const primaryChannel = this.asString(
+      row.channel || row.lastChannel || deliveryChannel || row.platform
+    )
+    const channel = this.resolveSessionChannel({
+      primary: primaryChannel,
+      fallback: parsed.channel,
+    })
     const tokenUsage =
       this.normalizeTokenUsage(row.tokenUsage) ||
       this.normalizeTokenUsage(row.usage) ||
       this.normalizeTokenUsage(row.tokens)
     return {
       key,
-      agentId: this.asString(row.agentId || row.agent, 'main'),
-      channel: this.asString(row.channel || row.platform, 'unknown'),
-      peer: this.asString(row.peer || row.user || row.recipient),
+      agentId: this.asString(row.agentId || row.agent || parsed.agentId, 'main'),
+      channel,
+      peer: this.asString(row.peer || row.user || row.recipient || row.subject || parsed.peer),
       messageCount: this.asNumber(row.messageCount || row.messages || row.turns, 0),
       lastActivity: this.asString(row.lastActivity || row.updatedAt || row.lastSeen),
       model: this.asString(row.model || row.modelName) || undefined,

@@ -197,14 +197,14 @@ function goToChannels() {
 <template>
   <NSpin :show="configStore.loading">
     <NSpace vertical :size="16">
-      <NCard title="openclaw.json 管理" style="border-radius: var(--radius-lg);">
+      <NCard title="openclaw.json 管理" class="app-card">
         <template #header-extra>
-          <NSpace :size="8">
-            <NButton size="small" @click="configStore.fetchConfig()">
+          <NSpace :size="8" class="app-toolbar">
+            <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="configStore.fetchConfig()">
               <template #icon><NIcon :component="RefreshOutline" /></template>
               刷新
             </NButton>
-            <NButton size="small" type="warning" @click="handleApply">
+            <NButton size="small" type="warning" class="app-toolbar-btn app-toolbar-btn--apply" @click="handleApply">
               应用并重载
             </NButton>
           </NSpace>

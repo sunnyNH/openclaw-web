@@ -64,9 +64,9 @@ async function confirmPairing() {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="节点管理" style="border-radius: var(--radius-lg);">
+    <NCard title="节点管理" class="app-card">
       <template #header-extra>
-        <NButton size="small" @click="nodeStore.fetchNodes()">
+        <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="nodeStore.fetchNodes()">
           <template #icon><NIcon :component="RefreshOutline" /></template>
           刷新
         </NButton>

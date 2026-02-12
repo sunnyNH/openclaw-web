@@ -62,12 +62,145 @@ export function truncate(str: string, maxLength: number): string {
   return str.slice(0, maxLength - 3) + '...'
 }
 
+const SESSION_CHANNEL_ALIASES: Record<string, string> = {
+  qqbot: 'qq',
+  'feishu-china': 'feishu',
+  'wecom-app': 'wecom',
+}
+
+function normalizeSessionChannel(raw: string): string {
+  const value = raw.trim().toLowerCase()
+  if (!value) return 'main'
+  return SESSION_CHANNEL_ALIASES[value] || value
+}
+
 export function parseSessionKey(key: string): { agent: string; channel: string; peer: string } {
-  const parts = key.split(':')
+  const raw = key.trim()
+  if (!raw) {
+    return {
+      agent: 'main',
+      channel: 'main',
+      peer: '',
+    }
+  }
+
+  const lowered = raw.toLowerCase()
+  if (lowered === 'main') {
+    return {
+      agent: 'main',
+      channel: 'main',
+      peer: '',
+    }
+  }
+  if (lowered === 'global') {
+    return {
+      agent: 'main',
+      channel: 'global',
+      peer: '',
+    }
+  }
+  if (lowered === 'unknown') {
+    return {
+      agent: 'main',
+      channel: 'unknown',
+      peer: '',
+    }
+  }
+
+  const parts = raw.split(':').filter(Boolean)
+  if (parts.length === 0) {
+    return {
+      agent: 'main',
+      channel: 'main',
+      peer: '',
+    }
+  }
+
+  // Canonical OpenClaw form: agent:<agentId>:<rest...>
+  if (parts[0] === 'agent' && parts.length >= 3) {
+    const agent = parts[1] || 'main'
+    const rest = parts.slice(2)
+    const head = rest[0]?.toLowerCase() || ''
+
+    if (!head || head === 'main') {
+      return {
+        agent,
+        channel: 'main',
+        peer: rest.slice(1).join(':'),
+      }
+    }
+
+    if (head === 'direct') {
+      return {
+        agent,
+        channel: 'main',
+        peer: rest.slice(1).join(':'),
+      }
+    }
+
+    if (head === 'cron' || head === 'subagent' || head === 'acp') {
+      return {
+        agent,
+        channel: head,
+        peer: rest.slice(1).join(':'),
+      }
+    }
+
+    const second = rest[1]?.toLowerCase() || ''
+    const third = rest[2]?.toLowerCase() || ''
+
+    if (second === 'direct' || second === 'group' || second === 'channel') {
+      return {
+        agent,
+        channel: normalizeSessionChannel(head),
+        peer: rest.slice(2).join(':'),
+      }
+    }
+
+    if (third === 'direct' || third === 'group' || third === 'channel') {
+      return {
+        agent,
+        channel: normalizeSessionChannel(head),
+        peer: rest.slice(3).join(':'),
+      }
+    }
+
+    return {
+      agent,
+      channel: normalizeSessionChannel(head),
+      peer: rest.slice(1).join(':'),
+    }
+  }
+
+  // Legacy or alias forms.
+  if (parts[0] === 'cron') {
+    return {
+      agent: 'main',
+      channel: 'cron',
+      peer: parts.slice(1).join(':'),
+    }
+  }
+
+  if (parts[0] === 'direct') {
+    return {
+      agent: 'main',
+      channel: 'main',
+      peer: parts.slice(1).join(':'),
+    }
+  }
+
+  if (parts.length >= 2) {
+    return {
+      agent: parts[0] || 'main',
+      channel: normalizeSessionChannel(parts[1] || 'main'),
+      peer: parts.slice(2).join(':'),
+    }
+  }
+
   return {
-    agent: parts[1] || 'main',
-    channel: parts[2] || 'unknown',
-    peer: parts.slice(3).join(':') || '',
+    agent: 'main',
+    channel: 'main',
+    peer: '',
   }
 }
 

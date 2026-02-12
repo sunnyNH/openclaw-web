@@ -11,7 +11,6 @@ import {
   NGridItem,
   NIcon,
   NInput,
-  NInputGroup,
   NModal,
   NPopconfirm,
   NSelect,
@@ -30,6 +29,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSkillStore } from '@/stores/skill'
 import { useWebSocketStore } from '@/stores/websocket'
 import { formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
+import { renderSimpleMarkdown } from '@/utils/markdown'
 import type { ChatMessage, Skill } from '@/api/types'
 
 const message = useMessage()
@@ -85,6 +85,11 @@ const selectedSession = computed(() =>
   sessionStore.sessions.find((session) => session.key === normalizedSessionKey.value) || null
 )
 const sessionMeta = computed(() => parseSessionKey(normalizedSessionKey.value))
+const sessionChannelDisplay = computed(() => {
+  const channel = selectedSession.value?.channel?.trim().toLowerCase() || ''
+  if (!channel || channel === 'unknown') return sessionMeta.value.channel
+  return channel
+})
 
 const messageList = computed(() => chatStore.messages)
 const filteredMessages = computed(() => {
@@ -187,6 +192,7 @@ const slashCommandPresets: SlashCommandPreset[] = [
   },
 ]
 const transcriptLoading = computed(() => chatStore.loading && messageList.value.length === 0)
+const refreshingChatData = computed(() => sessionStore.loading || chatStore.loading)
 const syncHint = computed(() => {
   if (chatStore.syncing) return '实时同步中...'
   if (chatStore.lastSyncedAt) {
@@ -512,6 +518,73 @@ function ensureSessionKey(): string {
   const normalized = sessionKeyInput.value.trim() || 'main'
   sessionKeyInput.value = normalized
   return normalized
+}
+
+async function loadHistoryForKey(rawKey: string, options?: { force?: boolean }) {
+  const key = rawKey.trim() || 'main'
+  sessionKeyInput.value = key
+
+  const shouldSkip =
+    !options?.force &&
+    key === chatStore.sessionKey &&
+    !chatStore.loading &&
+    !chatStore.syncing
+  if (shouldSkip) return
+
+  chatStore.setSessionKey(key)
+  await chatStore.fetchHistory(key)
+  await nextTick()
+  autoFollowBottom.value = true
+  requestScrollToBottom({ force: true })
+}
+
+function normalizeSessionSelectValue(value: string | number | null): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number') return String(value).trim()
+  return ''
+}
+
+function handleSessionKeyChange(value: string | number | null) {
+  const key = normalizeSessionSelectValue(value)
+  if (!key) return
+  void loadHistoryForKey(key, { force: true })
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function looksLikeMarkdown(value: string): boolean {
+  const text = value.replace(/\r\n/g, '\n')
+  if (!text.trim()) return false
+  if (/```[\s\S]*```/.test(text)) return true
+  if (/\[[^\]]+]\((https?:\/\/[^)\s]+)\)/.test(text)) return true
+  if (/(^|\s)\*\*[^*\n]+\*\*(\s|$)/.test(text)) return true
+  if (/(^|\s)\*[^*\n]+\*(\s|$)/.test(text)) return true
+  if (/^\s{0,3}#{1,6}\s+\S+/m.test(text)) return true
+  if (/^\s{0,3}>\s+\S+/m.test(text)) return true
+  if (/^\s{0,3}[-*+]\s+\S+/m.test(text)) return true
+  if (/^\s{0,3}[-*_]{3,}\s*$/m.test(text)) return true
+  return false
+}
+
+function renderPlainText(content: string): string {
+  const escaped = escapeHtml(content || '')
+  return `<p>${escaped.replace(/\n/g, '<br />')}</p>`
+}
+
+function renderChatMarkdown(content: string, role?: ChatMessage['role']): string {
+  const text = content || ''
+  if (!looksLikeMarkdown(text)) {
+    return renderPlainText(text)
+  }
+  const autoNestList = role === 'assistant' || role === 'tool' || role === 'system'
+  return renderSimpleMarkdown(text, { autoNestList })
 }
 
 function isNearBottom(): boolean {
@@ -1238,16 +1311,6 @@ async function handleDraftKeydown(event: KeyboardEvent) {
 }
 
 watch(
-  () => chatStore.sessionKey,
-  (value) => {
-    if (value !== sessionKeyInput.value) {
-      sessionKeyInput.value = value
-    }
-  },
-  { immediate: true }
-)
-
-watch(
   slashSuggestions,
   (list) => {
     if (!list.length) {
@@ -1320,17 +1383,17 @@ onMounted(async () => {
   )
 
   await sessionStore.fetchSessions()
+  const currentStoreKey = chatStore.sessionKey.trim()
+  if (!sessionKeyInput.value && currentStoreKey) {
+    sessionKeyInput.value = currentStoreKey
+  }
+
   const firstSession = sessionStore.sessions[0]
   if (!sessionKeyInput.value && firstSession) {
     sessionKeyInput.value = firstSession.key
   }
 
-  const key = ensureSessionKey()
-  chatStore.setSessionKey(key)
-  await chatStore.fetchHistory(key)
-  await nextTick()
-  autoFollowBottom.value = true
-  requestScrollToBottom({ force: true })
+  await loadHistoryForKey(ensureSessionKey(), { force: true })
 })
 
 onUnmounted(() => {
@@ -1339,17 +1402,9 @@ onUnmounted(() => {
   cancelPendingScroll()
 })
 
-async function handleRefreshSessions() {
+async function handleRefreshChatData() {
   await sessionStore.fetchSessions()
-}
-
-async function handleLoadHistory() {
-  const key = ensureSessionKey()
-  chatStore.setSessionKey(key)
-  await chatStore.fetchHistory(key)
-  await nextTick()
-  autoFollowBottom.value = true
-  requestScrollToBottom({ force: true })
+  await loadHistoryForKey(ensureSessionKey(), { force: true })
 }
 
 async function handleSend() {
@@ -1374,16 +1429,12 @@ async function handleSend() {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="在线对话（工作台）" style="border-radius: var(--radius-lg);">
+    <NCard title="在线对话（工作台）" class="app-card">
       <template #header-extra>
-        <NSpace :size="8">
-          <NButton size="small" :loading="sessionStore.loading" @click="handleRefreshSessions">
+        <NSpace :size="8" class="app-toolbar">
+          <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="refreshingChatData" @click="handleRefreshChatData">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新会话
-          </NButton>
-          <NButton size="small" :loading="chatStore.loading" @click="handleLoadHistory">
-            <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新历史
+            刷新聊天数据
           </NButton>
         </NSpace>
       </template>
@@ -1409,17 +1460,15 @@ async function handleSend() {
 
               <div>
                 <NText depth="3" style="font-size: 12px;">会话 Key</NText>
-                <NInputGroup style="margin-top: 6px;">
-                  <NSelect
-                    v-model:value="sessionKeyInput"
-                    :options="sessionOptions"
-                    filterable
-                    tag
-                    placeholder="输入或选择会话 Key"
-                    style="min-width: 240px;"
-                  />
-                  <NButton @click="handleLoadHistory" :loading="chatStore.loading">加载</NButton>
-                </NInputGroup>
+                <NSelect
+                  v-model:value="sessionKeyInput"
+                  :options="sessionOptions"
+                  filterable
+                  tag
+                  placeholder="输入或选择会话 Key（选中后自动加载）"
+                  style="min-width: 240px; margin-top: 6px;"
+                  @update:value="handleSessionKeyChange"
+                />
               </div>
 
               <div class="chat-quick-panel">
@@ -1499,7 +1548,7 @@ async function handleSend() {
                 </div>
                 <div class="chat-kv-row">
                   <span>Channel</span>
-                  <code>{{ selectedSession?.channel || sessionMeta.channel }}</code>
+                  <code>{{ sessionChannelDisplay }}</code>
                 </div>
                 <div class="chat-kv-row">
                   <span>Peer</span>
@@ -1687,13 +1736,17 @@ async function handleSend() {
 
                           <div
                             v-if="entry.structured.plainTexts.length"
-                            class="chat-bubble-content structured-plain-text"
+                            class="chat-bubble-content structured-plain-text chat-markdown"
+                            v-html="renderChatMarkdown(entry.structured.plainTexts.join('\n'), entry.item.role)"
                           >
-                            {{ entry.structured.plainTexts.join('\n') }}
                           </div>
                         </div>
 
-                        <div v-else class="chat-bubble-content">{{ entry.item.content }}</div>
+                        <div
+                          v-else
+                          class="chat-bubble-content chat-markdown"
+                          v-html="renderChatMarkdown(entry.item.content, entry.item.role)"
+                        ></div>
                       </div>
                     </template>
 
@@ -2110,6 +2163,182 @@ async function handleSend() {
   white-space: pre-wrap;
   line-height: 1.65;
   word-break: break-word;
+}
+
+.chat-markdown {
+  white-space: normal;
+  font-size: 13.5px;
+  line-height: 1.72;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.chat-markdown :deep(> :first-child) {
+  margin-top: 0;
+}
+
+.chat-markdown :deep(> :last-child) {
+  margin-bottom: 0;
+}
+
+/* —— 标题 —— */
+.chat-markdown :deep(h1),
+.chat-markdown :deep(h2),
+.chat-markdown :deep(h3),
+.chat-markdown :deep(h4),
+.chat-markdown :deep(h5),
+.chat-markdown :deep(h6) {
+  margin: 16px 0 4px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.chat-markdown :deep(h1) { font-size: 1.25em; }
+.chat-markdown :deep(h2) { font-size: 1.12em; }
+.chat-markdown :deep(h3) { font-size: 1.02em; }
+
+/* —— 段落 —— */
+.chat-markdown :deep(p) {
+  margin: 4px 0;
+  line-height: 1.72;
+}
+
+/* —— 无序列表 —— */
+.chat-markdown :deep(ul) {
+  margin: 4px 0;
+  padding-left: 1.1em;
+  list-style: none;
+}
+
+.chat-markdown :deep(ul > li) {
+  position: relative;
+  margin: 2px 0;
+  line-height: 1.72;
+}
+
+.chat-markdown :deep(ul > li::before) {
+  content: '';
+  position: absolute;
+  left: -0.88em;
+  top: 0.58em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--md-bullet-color);
+}
+
+/* 嵌套列表 */
+.chat-markdown :deep(ul ul) {
+  margin: 1px 0 1px 0.15em;
+}
+
+.chat-markdown :deep(ul ul > li::before) {
+  width: 3.5px;
+  height: 3.5px;
+  background: transparent;
+  border: 1px solid var(--md-bullet-nested-color);
+  top: 0.62em;
+}
+
+/* 三级列表 */
+.chat-markdown :deep(ul ul ul > li::before) {
+  width: 3px;
+  height: 3px;
+  border: none;
+  background: var(--md-bullet-nested-color);
+  border-radius: 0;
+}
+
+/* —— 有序列表 —— */
+.chat-markdown :deep(ol) {
+  margin: 4px 0;
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+
+.chat-markdown :deep(ol > li) {
+  margin: 2px 0;
+  line-height: 1.72;
+}
+
+.chat-markdown :deep(ol > li::marker) {
+  color: var(--md-bullet-color);
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+/* —— 链接 —— */
+.chat-markdown :deep(a) {
+  color: var(--link-color);
+  text-decoration: none;
+  font-weight: 500;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  transition: color 0.12s ease, text-decoration-color 0.12s ease;
+  text-decoration-line: underline;
+  text-decoration-color: var(--link-underline);
+}
+
+.chat-markdown :deep(a:hover) {
+  color: var(--link-color-hover);
+  text-decoration-color: var(--link-color-hover);
+}
+
+/* —— 引用块 —— */
+.chat-markdown :deep(blockquote) {
+  margin: 6px 0;
+  padding: 4px 10px;
+  border-left: 2.5px solid var(--md-blockquote-border);
+  border-radius: 0 4px 4px 0;
+  background: var(--md-blockquote-bg);
+}
+
+.chat-markdown :deep(blockquote p) {
+  margin: 2px 0;
+  color: var(--text-secondary);
+  font-size: 0.94em;
+}
+
+/* —— 代码 —— */
+.chat-markdown :deep(pre) {
+  margin: 6px 0;
+  padding: 9px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-pre-bg);
+  overflow-x: auto;
+  line-height: 1.52;
+}
+
+.chat-markdown :deep(code) {
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  font-size: 0.87em;
+}
+
+.chat-markdown :deep(p code),
+.chat-markdown :deep(li code) {
+  padding: 0.5px 4.5px;
+  border-radius: 3px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-code-bg);
+}
+
+/* —— 分割线 —— */
+.chat-markdown :deep(hr) {
+  border: 0;
+  height: 1px;
+  background: var(--border-color);
+  margin: 10px 0;
+}
+
+/* —— 加粗/强调 —— */
+.chat-markdown :deep(strong) {
+  font-weight: 600;
+}
+
+.chat-markdown :deep(em) {
+  font-style: italic;
 }
 
 .structured-message-list {

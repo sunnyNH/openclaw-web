@@ -94,7 +94,7 @@ function roleLabel(role: string): string {
     </NSpace>
 
     <NSpin :show="sessionStore.loading">
-      <NCard style="border-radius: var(--radius-lg);">
+      <NCard class="app-card">
         <template #header>
           <NSpace align="center">
             <NText>对话记录</NText>
@@ -104,18 +104,18 @@ function roleLabel(role: string): string {
           </NSpace>
         </template>
         <template #header-extra>
-          <NSpace :size="8">
-            <NButton size="small" @click="sessionStore.fetchSession(sessionKey)">
+          <NSpace :size="8" class="app-toolbar">
+            <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="sessionStore.fetchSession(sessionKey)">
               <template #icon><NIcon :component="RefreshOutline" /></template>
               刷新
             </NButton>
-            <NButton size="small" @click="handleExport">
+            <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="handleExport">
               <template #icon><NIcon :component="DownloadOutline" /></template>
               导出
             </NButton>
             <NPopconfirm @positive-click="handleReset">
               <template #trigger>
-                <NButton size="small">
+                <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh">
                   <template #icon><NIcon :component="RefreshOutline" /></template>
                   重置
                 </NButton>
@@ -124,7 +124,7 @@ function roleLabel(role: string): string {
             </NPopconfirm>
             <NPopconfirm @positive-click="handleDelete">
               <template #trigger>
-                <NButton size="small" type="error">
+                <NButton size="small" type="error" class="app-toolbar-btn">
                   <template #icon><NIcon :component="TrashOutline" /></template>
                   删除
                 </NButton>

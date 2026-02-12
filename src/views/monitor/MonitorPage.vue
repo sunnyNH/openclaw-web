@@ -74,9 +74,9 @@ watch(
 </script>
 
 <template>
-  <NCard title="Agent 实时监控" style="border-radius: var(--radius-lg);">
+  <NCard title="Agent 实时监控" class="app-card">
     <template #header-extra>
-      <NSpace :size="12" align="center">
+      <NSpace :size="12" align="center" class="app-toolbar">
         <NSelect
           v-model:value="filterType"
           :options="eventTypeOptions"
@@ -94,6 +94,7 @@ watch(
         <NButton
           size="small"
           :type="monitorStore.paused ? 'primary' : 'default'"
+          class="app-toolbar-btn"
           @click="monitorStore.paused = !monitorStore.paused"
         >
           <template #icon>
@@ -103,7 +104,7 @@ watch(
         </NButton>
 
         <NBadge :value="monitorStore.eventCount" :max="999" :offset="[-4, 0]">
-          <NButton size="small" @click="clear">
+          <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="clear">
             <template #icon><NIcon :component="TrashOutline" /></template>
             清空
           </NButton>

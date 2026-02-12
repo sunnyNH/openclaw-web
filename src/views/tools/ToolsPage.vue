@@ -88,9 +88,9 @@ onMounted(fetchTools)
 </script>
 
 <template>
-  <NCard title="工具管理" style="border-radius: var(--radius-lg);">
+  <NCard title="工具管理" class="app-card">
     <template #header-extra>
-      <NSpace :size="8">
+      <NSpace :size="8" class="app-toolbar">
         <NInput
           v-model:value="searchQuery"
           placeholder="搜索工具..."
@@ -102,7 +102,7 @@ onMounted(fetchTools)
             <NIcon :component="SearchOutline" />
           </template>
         </NInput>
-        <NButton size="small" @click="fetchTools">
+        <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="fetchTools">
           <template #icon><NIcon :component="RefreshOutline" /></template>
           刷新
         </NButton>
