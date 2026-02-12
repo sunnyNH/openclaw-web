@@ -50,15 +50,22 @@ function parseTopLevelListItem(line: string): { kind: 'ul' | 'ol'; content: stri
   return null
 }
 
+function normalizeGroupingText(content: string): string {
+  // 容忍常见 markdown 包裹（如 **摘要：**），避免分组识别被装饰符影响
+  return content
+    .trim()
+    .replace(/[*_`~]/g, '')
+}
+
 function looksLikeGroupTitle(content: string): boolean {
-  const text = content.trim()
+  const text = normalizeGroupingText(content)
   if (!text) return false
   if (/\[[^\]]+]\(https?:\/\/[^)\s]+\)/.test(text)) return true
   return false
 }
 
 function looksLikeGroupSubItem(content: string): boolean {
-  const text = content.trim()
+  const text = normalizeGroupingText(content)
   if (!text) return false
   if (/^(摘要|要点|点评|锐评|结论|说明|来源|备注|时间|链接)\s*[:：]/.test(text)) return true
   if (/^「[^」]{1,20}」\s*(锐评|点评|评论)\s*[:：]/.test(text)) return true
