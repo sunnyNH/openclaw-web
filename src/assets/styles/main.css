@@ -25,9 +25,9 @@
   --sidebar-width: 240px;
   --sidebar-collapsed: 64px;
   --header-height: 56px;
-  --link-color: #1a6de0;
-  --link-color-hover: #0f52b5;
-  --link-underline: rgba(26, 109, 224, 0.28);
+  --link-color: #16a34a;
+  --link-color-hover: #15803d;
+  --link-underline: rgba(22, 163, 74, 0.28);
   --md-bullet-color: #9ca3af;
   --md-bullet-nested-color: #c4c9d2;
   --md-blockquote-bg: rgba(100, 116, 139, 0.06);
@@ -52,9 +52,9 @@
   --toolbar-save-shadow-hover: 0 10px 20px rgba(5, 150, 105, 0.28);
   --toolbar-apply-shadow: 0 8px 16px rgba(245, 158, 11, 0.22);
   --toolbar-apply-shadow-hover: 0 10px 20px rgba(245, 158, 11, 0.28);
-  --link-color: #7cb8ff;
-  --link-color-hover: #a8d1ff;
-  --link-underline: rgba(124, 184, 255, 0.3);
+  --link-color: #34d399;
+  --link-color-hover: #6ee7b7;
+  --link-underline: rgba(52, 211, 153, 0.3);
   --md-bullet-color: #6b7280;
   --md-bullet-nested-color: #4b5563;
   --md-blockquote-bg: rgba(160, 160, 176, 0.07);
