@@ -1,11 +1,39 @@
 export interface OpenClawConfig {
   agents?: AgentConfig
   channels?: Record<string, ChannelConfig>
+  plugins?: PluginsConfig
   bindings?: Binding[]
   tools?: ToolsConfig
   session?: SessionConfig
   gateway?: GatewayConfig
   models?: ModelsConfig
+}
+
+export interface PluginsConfig {
+  enabled?: boolean
+  allow?: string[]
+  deny?: string[]
+  load?: {
+    paths?: string[]
+  }
+  entries?: Record<string, PluginEntryConfig>
+  installs?: Record<string, PluginInstallRecord>
+}
+
+export interface PluginEntryConfig {
+  enabled?: boolean
+  config?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface PluginInstallRecord {
+  source?: 'npm' | 'archive' | 'path' | string
+  spec?: string
+  sourcePath?: string
+  installPath?: string
+  version?: string
+  installedAt?: string
+  [key: string]: unknown
 }
 
 export interface AgentConfig {
@@ -38,11 +66,35 @@ export interface ToolPolicyConfig {
   profile?: 'minimal' | 'coding' | 'full'
 }
 
+export interface ChannelSecretField {
+  path: string
+  label?: string
+  required?: boolean
+  masked?: string
+}
+
+export interface ChannelAccountConfig {
+  enabled?: boolean
+  dmPolicy?: string
+  allowFrom?: string[]
+  groupPolicy?: string
+  requireMention?: boolean
+  groupAllowFrom?: string[]
+  groups?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export interface ChannelConfig {
   enabled?: boolean
   dmPolicy?: string
   allowFrom?: string[]
+  groupPolicy?: string
+  requireMention?: boolean
+  groupAllowFrom?: string[]
   groups?: Record<string, unknown>
+  accounts?: Record<string, ChannelAccountConfig>
+  secretFields?: ChannelSecretField[]
+  [key: string]: unknown
 }
 
 export interface Binding {

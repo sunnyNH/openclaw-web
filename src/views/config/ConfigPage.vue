@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NCard,
   NSpace,
@@ -19,12 +20,13 @@ import {
   NScrollbar,
   useMessage,
 } from 'naive-ui'
-import { RefreshOutline, SaveOutline } from '@vicons/ionicons5'
+import { GitNetworkOutline, RefreshOutline, SaveOutline } from '@vicons/ionicons5'
 import { useConfigStore } from '@/stores/config'
 import type { ConfigPatch } from '@/api/types'
 
 const configStore = useConfigStore()
 const message = useMessage()
+const router = useRouter()
 const activeTab = ref('general')
 const rawJsonEdit = ref('')
 
@@ -186,6 +188,10 @@ const queueModeOptions = [
   { label: '并发执行', value: 'concurrent' },
   { label: '批量收集', value: 'collect' },
 ]
+
+function goToChannels() {
+  router.push({ name: 'Channels' })
+}
 </script>
 
 <template>
@@ -204,7 +210,18 @@ const queueModeOptions = [
           </NSpace>
         </template>
 
+        <NAlert type="info" :bordered="false" style="margin-top: 12px;">
+          <NSpace justify="space-between" align="center">
+            <span>频道账号、策略、认证配对、凭证更新已迁移到频道管理页集中维护，建议从该入口进行日常运维。</span>
+            <NButton size="tiny" type="primary" ghost @click="goToChannels">
+              <template #icon><NIcon :component="GitNetworkOutline" /></template>
+              前往频道管理
+            </NButton>
+          </NSpace>
+        </NAlert>
+
         <NTabs v-model:value="activeTab" type="line" animated>
+
           <!-- General -->
           <NTabPane name="general" tab="基本设置">
             <NForm label-placement="left" label-width="120" style="max-width: 600px; margin-top: 16px;">

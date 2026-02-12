@@ -4,10 +4,29 @@ import { OpenClawWebSocket } from '@/api/websocket'
 import { RPCClient } from '@/api/rpc-client'
 import { ConnectionState } from '@/api/types'
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
+}
+
+function normalizeGatewayMethods(payload: unknown): string[] {
+  const row = asRecord(payload)
+  const features = asRecord(row.features)
+  if (!Array.isArray(features.methods)) return []
+
+  return features.methods
+    .filter((method): method is string => typeof method === 'string')
+    .map((method) => method.trim())
+    .filter(Boolean)
+}
+
 export const useWebSocketStore = defineStore('websocket', () => {
   const state = ref<ConnectionState>(ConnectionState.DISCONNECTED)
   const lastError = ref<string | null>(null)
   const reconnectAttempts = ref(0)
+  const gatewayMethods = ref<string[]>([])
   let listenersBound = false
 
   const ws = shallowRef<OpenClawWebSocket>(new OpenClawWebSocket())
@@ -32,6 +51,10 @@ export const useWebSocketStore = defineStore('websocket', () => {
       lastError.value = reason as string
     })
 
+    ws.value.on('connected', (payload: unknown) => {
+      gatewayMethods.value = normalizeGatewayMethods(payload)
+    })
+
     ws.value.on('disconnected', (code: unknown, reason: unknown) => {
       if (state.value !== ConnectionState.DISCONNECTED && state.value !== ConnectionState.FAILED) {
         lastError.value = `连接断开 (code: ${String(code)}, reason: ${String(reason || 'n/a')})`
@@ -49,20 +72,29 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   function disconnect() {
     ws.value.disconnect()
+    gatewayMethods.value = []
   }
 
   function subscribe(event: string, handler: (...args: unknown[]) => void): () => void {
     return ws.value.on(event, handler)
   }
 
+  function supportsAnyMethod(methods: string[]): boolean {
+    if (gatewayMethods.value.length === 0) return false
+    const methodSet = new Set(gatewayMethods.value)
+    return methods.some((method) => methodSet.has(method))
+  }
+
   return {
     state,
     lastError,
     reconnectAttempts,
+    gatewayMethods,
     ws,
     rpc,
     connect,
     disconnect,
     subscribe,
+    supportsAnyMethod,
   }
 })

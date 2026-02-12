@@ -55,6 +55,12 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'Model 管理', icon: 'SparklesOutline' },
       },
       {
+        path: 'channels',
+        name: 'Channels',
+        component: () => import('@/views/channels/ChannelsPage.vue'),
+        meta: { title: '频道管理', icon: 'GitNetworkOutline' },
+      },
+      {
         path: 'config',
         redirect: { name: 'Models' },
         meta: { hidden: true },

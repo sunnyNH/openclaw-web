@@ -16,6 +16,14 @@ export interface Skill {
   hasUpdate?: boolean
 }
 
+export interface PluginPackage {
+  name: string
+  installed: boolean
+  version?: string
+  enabled?: boolean
+  status?: string
+}
+
 export interface Tool {
   name: string
   description: string

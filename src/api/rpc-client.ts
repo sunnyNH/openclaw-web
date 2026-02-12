@@ -10,6 +10,7 @@ import type {
   ChannelStatus,
   OpenClawConfig,
   ConfigPatch,
+  PluginPackage,
   Skill,
   Tool,
   DeviceNode,
@@ -214,17 +215,241 @@ export class RPCClient {
 
     const groupsRaw = row.groups
     const groups = Array.isArray(groupsRaw) ? groupsRaw : undefined
+    const groupAllowFromRaw = row.groupAllowFrom || row.allowFrom
+    const groupAllowFrom = Array.isArray(groupAllowFromRaw)
+      ? groupAllowFromRaw
+          .map((item) => this.asString(item))
+          .filter((item) => !!item.trim())
+      : undefined
+    const requireMention = 'requireMention' in row
+      ? this.asBoolean(row.requireMention, false)
+      : undefined
+    const groupPolicy = this.asString(row.groupPolicy)
+    const channelKey = this.asString(row.channelKey || row.channel || row.platform || row.type || row.kind || row.id)
+    const accountId = this.asString(
+      row.accountId ||
+        row.account ||
+        row.accountName ||
+        row.botId ||
+        row.selfId ||
+        row.userId
+    )
+    const id = this.asString(
+      row.id ||
+        row.channelId ||
+        row.name ||
+        (channelKey && accountId ? `${channelKey}:${accountId}` : channelKey),
+      'unknown'
+    )
 
     return {
-      id: this.asString(row.id || row.channelId || row.channel || row.name, 'unknown'),
-      platform: this.asString(row.platform || row.channel || row.id, 'unknown'),
+      id,
+      platform: this.asString(row.platform || channelKey || row.id, 'unknown'),
+      channelKey: channelKey || undefined,
+      accountId: accountId || undefined,
       enabled: this.asBoolean(row.enabled, true),
       status,
       accountName: this.asString(row.accountName || row.account || row.name) || undefined,
       memberCount: this.asNumber(row.memberCount, 0) || undefined,
       dmPolicy,
+      groupPolicy: groupPolicy || undefined,
+      requireMention,
+      groupAllowFrom,
       groups: groups as Channel['groups'],
     }
+  }
+
+  private normalizeChannelStatusFromSnapshot(params: {
+    connected?: boolean
+    running?: boolean
+    linked?: boolean
+    configured?: boolean
+    hasConnected?: boolean
+    hasRunning?: boolean
+    hasLinked?: boolean
+    lastError?: string
+  }): ChannelStatus {
+    const connectedKnown = params.hasConnected ?? params.connected !== undefined
+    const runningKnown = params.hasRunning ?? params.running !== undefined
+    const linkedKnown = params.hasLinked ?? params.linked !== undefined
+    const connected = connectedKnown && params.connected === true
+    const running = runningKnown && params.running === true
+    const linked = linkedKnown && params.linked === true
+    const explicitlyUnlinked = linkedKnown && params.linked === false
+    const lastError = (params.lastError || '').trim().toLowerCase()
+    const benignErrors = new Set([
+      '',
+      'disabled',
+      'not configured',
+      'unconfigured',
+      'not linked',
+      'disconnected',
+      'offline',
+    ])
+
+    if (connected) return 'connected'
+    if (lastError && !benignErrors.has(lastError)) return 'error'
+    if (running && explicitlyUnlinked) return 'authenticating'
+
+    if (connectedKnown && params.connected === false) {
+      if (running && !explicitlyUnlinked) return 'disconnected'
+      if (linked) return 'disconnected'
+      return params.configured === true ? 'disconnected' : 'disconnected'
+    }
+
+    if (running || linked) return 'connected'
+    if (params.configured === true) return 'disconnected'
+    return 'disconnected'
+  }
+
+  private normalizeChannelAccountEntries(
+    accountsRaw: unknown,
+    defaultAccountId: string
+  ): Array<Record<string, unknown>> {
+    if (Array.isArray(accountsRaw)) {
+      return accountsRaw
+        .map((accountRaw) => this.asRecord(accountRaw))
+        .filter((account) => Object.keys(account).length > 0)
+    }
+
+    const accountMap = this.asRecord(accountsRaw)
+    const entries: Array<Record<string, unknown>> = []
+    for (const [key, accountRaw] of Object.entries(accountMap)) {
+      const account = this.asRecord(accountRaw)
+      if (Object.keys(account).length === 0) continue
+      const accountId = this.asString(account.accountId || account.id, key || defaultAccountId)
+      entries.push({
+        ...account,
+        accountId,
+      })
+    }
+    return entries
+  }
+
+  private normalizeChannelsStatusPayload(payload: unknown): Channel[] {
+    const row = this.asRecord(payload)
+    const channelAccounts = this.asRecord(row.channelAccounts)
+    const channelsSummary = this.asRecord(row.channels)
+    const defaultAccountIdMap = this.asRecord(row.channelDefaultAccountId)
+    const result: Channel[] = []
+    const seen = new Set<string>()
+
+    const pushChannel = (value: Record<string, unknown>) => {
+      const normalized = this.normalizeChannelItem(value)
+      if (!normalized.id || seen.has(normalized.id)) return
+      seen.add(normalized.id)
+      result.push(normalized)
+    }
+
+    for (const [channelKey, accountsRaw] of Object.entries(channelAccounts)) {
+      const summary = this.asRecord(channelsSummary[channelKey])
+      const defaultAccountId = this.asString(defaultAccountIdMap[channelKey], 'default')
+      const accountEntries = this.normalizeChannelAccountEntries(accountsRaw, defaultAccountId)
+
+      if (accountEntries.length > 0) {
+        for (const account of accountEntries) {
+          const accountId = this.asString(account.accountId || account.id, defaultAccountId)
+          const hasConnected = 'connected' in account || 'connected' in summary
+          const hasRunning = 'running' in account || 'running' in summary
+          const hasLinked = 'linked' in account || 'linked' in summary
+          const status = this.normalizeChannelStatusFromSnapshot({
+            connected: 'connected' in account
+              ? this.asBoolean(account.connected, false)
+              : 'connected' in summary
+                ? this.asBoolean(summary.connected, false)
+                : undefined,
+            running: 'running' in account
+              ? this.asBoolean(account.running, false)
+              : 'running' in summary
+                ? this.asBoolean(summary.running, false)
+                : undefined,
+            linked: 'linked' in account
+              ? this.asBoolean(account.linked, false)
+              : 'linked' in summary
+                ? this.asBoolean(summary.linked, false)
+                : undefined,
+            configured: 'configured' in account
+              ? this.asBoolean(account.configured, false)
+              : 'configured' in summary
+                ? this.asBoolean(summary.configured, false)
+                : undefined,
+            hasConnected,
+            hasRunning,
+            hasLinked,
+            lastError: this.asString(account.lastError || summary.lastError),
+          })
+          pushChannel({
+            ...summary,
+            ...account,
+            id: `${channelKey}:${accountId}`,
+            channel: channelKey,
+            platform: channelKey,
+            channelKey,
+            accountId,
+            status,
+          })
+        }
+        continue
+      }
+
+      if (Object.keys(summary).length > 0) {
+        const hasConnected = 'connected' in summary
+        const hasRunning = 'running' in summary
+        const hasLinked = 'linked' in summary
+        const hasConfigured = 'configured' in summary
+        const status = this.normalizeChannelStatusFromSnapshot({
+          connected: hasConnected ? this.asBoolean(summary.connected, false) : undefined,
+          running: hasRunning ? this.asBoolean(summary.running, false) : undefined,
+          linked: hasLinked ? this.asBoolean(summary.linked, false) : undefined,
+          configured: hasConfigured ? this.asBoolean(summary.configured, false) : undefined,
+          hasConnected,
+          hasRunning,
+          hasLinked,
+          lastError: this.asString(summary.lastError),
+        })
+        pushChannel({
+          ...summary,
+          id: `${channelKey}:${defaultAccountId}`,
+          channel: channelKey,
+          platform: channelKey,
+          channelKey,
+          accountId: defaultAccountId,
+          status,
+        })
+      }
+    }
+
+    if (result.length > 0) return result
+
+    for (const [channelKey, summaryRaw] of Object.entries(channelsSummary)) {
+      const summary = this.asRecord(summaryRaw)
+      const defaultAccountId = this.asString(defaultAccountIdMap[channelKey], 'default')
+      const hasConnected = 'connected' in summary
+      const hasRunning = 'running' in summary
+      const hasLinked = 'linked' in summary
+      const hasConfigured = 'configured' in summary
+      const status = this.normalizeChannelStatusFromSnapshot({
+        connected: hasConnected ? this.asBoolean(summary.connected, false) : undefined,
+        running: hasRunning ? this.asBoolean(summary.running, false) : undefined,
+        linked: hasLinked ? this.asBoolean(summary.linked, false) : undefined,
+        configured: hasConfigured ? this.asBoolean(summary.configured, false) : undefined,
+        hasConnected,
+        hasRunning,
+        hasLinked,
+        lastError: this.asString(summary.lastError),
+      })
+      pushChannel({
+        ...summary,
+        id: `${channelKey}:${defaultAccountId}`,
+        channel: channelKey,
+        platform: channelKey,
+        channelKey,
+        accountId: defaultAccountId,
+        status,
+      })
+    }
+
+    return result
   }
 
   private normalizeSkillItem(value: unknown): Skill {
@@ -242,6 +467,73 @@ export class RPCClient {
       skillKey: this.asString(row.skillKey) || undefined,
       hasUpdate: this.asBoolean(row.hasUpdate, false) || undefined,
     }
+  }
+
+  private normalizePluginItem(value: unknown): PluginPackage {
+    const row = this.asRecord(value)
+    const name = this.asString(
+      row.name || row.id || row.package || row.packageName || row.plugin || row.key
+    )
+
+    const status = this.asString(row.status || row.state || row.health)
+    const installed =
+      'installed' in row
+        ? this.asBoolean(row.installed, false)
+        : !(
+            status.toLowerCase() === 'missing' ||
+            status.toLowerCase() === 'not-installed' ||
+            status.toLowerCase() === 'uninstalled'
+          )
+
+    return {
+      name,
+      installed,
+      version: this.asString(row.version || row.ver) || undefined,
+      enabled: 'enabled' in row ? this.asBoolean(row.enabled, true) : undefined,
+      status: status || undefined,
+    }
+  }
+
+  private normalizePluginList(payload: unknown): PluginPackage[] {
+    const listByCandidates = this.normalizeList<unknown>(payload, [
+      'plugins',
+      'items',
+      'list',
+      'data',
+      'entries',
+    ])
+      .map((item) => this.normalizePluginItem(item))
+      .filter((item) => !!item.name)
+
+    if (listByCandidates.length > 0) {
+      return listByCandidates
+    }
+
+    const row = this.asRecord(payload)
+    const pluginsRaw = this.asRecord(row.plugins || row.items || row.data)
+    const entriesSource =
+      Object.keys(pluginsRaw).length > 0
+        ? pluginsRaw
+        : row
+
+    const fallback: PluginPackage[] = []
+    for (const [key, value] of Object.entries(entriesSource)) {
+      if (Array.isArray(value)) continue
+      if (value && typeof value === 'object') {
+        const parsed = this.normalizePluginItem({ key, ...(value as Record<string, unknown>) })
+        if (parsed.name) fallback.push(parsed)
+        continue
+      }
+      if (typeof value === 'boolean') {
+        fallback.push({ name: key, installed: value })
+        continue
+      }
+      if (typeof value === 'string' && value.trim()) {
+        fallback.push({ name: key, installed: true, version: value.trim() })
+      }
+    }
+
+    return fallback.filter((item) => !!item.name)
   }
 
   private normalizeSkillSource(row: Record<string, unknown>): Skill['source'] {
@@ -1137,11 +1429,16 @@ export class RPCClient {
 
   // --- Channels ---
   listChannels(): Promise<Channel[]> {
-    return this.callWithFallback<unknown>(['channels.status', 'channels.list', 'channel.list']).then((payload) =>
-      this.normalizeList<unknown>(payload, ['channels', 'items', 'list', 'data', 'status'])
+    return this.callWithFallback<unknown>(['channels.status', 'channels.list', 'channel.list']).then((payload) => {
+      const statusSnapshot = this.normalizeChannelsStatusPayload(payload)
+      if (statusSnapshot.length > 0) {
+        return statusSnapshot.filter((item) => !!item.id)
+      }
+
+      return this.normalizeList<unknown>(payload, ['channels', 'items', 'list', 'data', 'status'])
         .map((item) => this.normalizeChannelItem(item))
         .filter((item) => !!item.id)
-    )
+    })
   }
 
   authChannel(params: ChannelAuthParams): Promise<unknown> {
@@ -1158,6 +1455,27 @@ export class RPCClient {
 
   getChannelStatus(channelId: string): Promise<ChannelStatus> {
     return this.callWithFallback(['channel.status', 'channels.status'], { channelId })
+  }
+
+  // --- Plugins ---
+  listPlugins(): Promise<PluginPackage[]> {
+    return this.callWithMethodAndParamsFallback<unknown>(
+      ['plugins.list', 'plugin.list', 'plugins.status', 'plugin.status'],
+      [{}, undefined]
+    ).then((payload) => this.normalizePluginList(payload))
+  }
+
+  installPlugin(name: string): Promise<void> {
+    return this.callWithMethodAndParamsFallback(
+      ['plugins.install', 'plugin.install'],
+      [
+        { name },
+        { package: name },
+        { plugin: name },
+        { id: name },
+      ],
+      180000
+    )
   }
 
   // --- Skills ---

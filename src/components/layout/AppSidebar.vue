@@ -10,6 +10,7 @@ import {
   BookOutline,
   CalendarOutline,
   SparklesOutline,
+  GitNetworkOutline,
   ExtensionPuzzleOutline,
   CogOutline,
 } from '@vicons/ionicons5'
@@ -28,6 +29,7 @@ const iconMap: Record<string, unknown> = {
   BookOutline,
   CalendarOutline,
   SparklesOutline,
+  GitNetworkOutline,
   ExtensionPuzzleOutline,
   CogOutline,
 }
