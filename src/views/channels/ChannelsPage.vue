@@ -327,7 +327,7 @@ onMounted(() => {
         </NSpace>
       </template>
 
-      <NSpace vertical :size="12">
+      <NSpace vertical :size="10">
         <div class="thanks-panel">
           <div class="thanks-title-row">
             <span class="thanks-icon">
@@ -366,7 +366,7 @@ onMounted(() => {
               :name="card.channelKey"
             >
               <template #header>
-                <NSpace align="center" :size="10">
+                <NSpace align="center" :size="8" class="channel-header-row">
                   <span class="channel-brand" :class="`channel-brand--${card.key}`">
                     <FontAwesomeIcon :icon="card.icon" />
                   </span>
@@ -389,7 +389,7 @@ onMounted(() => {
                 </NSpace>
               </template>
 
-              <NSpace vertical :size="12" style="margin-top: 8px;">
+              <NSpace vertical :size="10" class="channel-section-stack">
                 <div class="channel-desc-panel">
                   <span>{{ card.description }}</span>
                   <a :href="card.guideUrl" target="_blank" rel="noopener noreferrer" class="desc-link">
@@ -403,7 +403,7 @@ onMounted(() => {
                   embedded
                   title="安装与配置"
                 >
-                  <NSpace justify="space-between" align="center">
+                  <NSpace justify="space-between" align="center" class="channel-install-row">
                     <NText depth="3">
                       {{
                         !card.pluginInstalled
@@ -443,7 +443,7 @@ onMounted(() => {
                 </NCard>
 
                 <NCard v-if="card.configured" size="small" title="基础配置" embedded>
-                  <NForm label-placement="left" label-width="140">
+                  <NForm label-placement="left" label-width="140" class="channel-config-form">
                     <NFormItem label="启用渠道">
                       <NSwitch
                         :value="channelEnabled(card.channelKey)"
@@ -486,7 +486,7 @@ onMounted(() => {
                     <NText depth="3">当前渠道未识别到渠道级凭证字段</NText>
                   </NSpace>
 
-                  <NForm v-else label-placement="left" label-width="160">
+                  <NForm v-else label-placement="left" label-width="160" class="channel-secret-form">
                     <NFormItem
                       v-for="field in card.visibleSecretKeys"
                       :key="`channel-secret-${card.channelKey}-${field}`"
@@ -579,6 +579,14 @@ onMounted(() => {
 
 .toolbar-actions {
   align-items: center;
+}
+
+:deep(.channel-root-card > .n-card-header) {
+  padding-bottom: 10px;
+}
+
+:deep(.channel-root-card > .n-card__content) {
+  padding-top: 12px;
 }
 
 .toolbar-actions :deep(.toolbar-btn.n-button) {
@@ -713,15 +721,20 @@ onMounted(() => {
   transform: translateY(-1px);
 }
 
+.channel-header-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
 .channel-brand {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 9px;
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
   box-shadow: 0 6px 12px rgba(15, 23, 42, 0.22);
 }
 
@@ -758,6 +771,18 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.channel-section-stack {
+  margin-top: 6px;
+}
+
+.channel-install-row {
+  row-gap: 10px;
+}
+
+:deep(.channel-install-row .n-button) {
+  flex-shrink: 0;
+}
+
 .desc-link {
   color: var(--channel-link);
   font-weight: 600;
@@ -775,11 +800,26 @@ onMounted(() => {
   overflow: hidden;
   background: var(--channel-card-bg) !important;
   transition: background-color 160ms ease;
-  margin-bottom: 10px;
+  margin: 0 !important;
+}
+
+:deep(.n-collapse) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 0;
+}
+
+:deep(.n-collapse-item:not(:first-child)) {
+  border-top: none !important;
 }
 
 :deep(.n-collapse-item .n-collapse-item__header) {
-  padding: 12px 14px;
+  padding: 10px 12px;
+}
+
+:deep(.n-collapse-item:first-child > .n-collapse-item__header) {
+  padding-top: 10px !important;
 }
 
 :deep(.n-collapse-item .n-collapse-item__header-main) {
@@ -789,6 +829,14 @@ onMounted(() => {
 :deep(.n-collapse-item .n-collapse-item__content-wrapper) {
   border-top: 1px solid var(--channel-card-border);
   background: var(--channel-card-bg);
+}
+
+:deep(.n-collapse-item .n-collapse-item__content-inner) {
+  padding: 10px 12px 12px;
+}
+
+:deep(.n-collapse-item__content-wrapper .n-collapse-item__content-inner) {
+  padding-top: 10px !important;
 }
 
 :deep(.n-card.n-card--embedded) {
@@ -810,6 +858,16 @@ onMounted(() => {
   padding: 2px 6px;
 }
 
+:deep(.channel-config-form .n-form-item),
+:deep(.channel-secret-form .n-form-item) {
+  margin-bottom: 10px;
+}
+
+:deep(.channel-config-form .n-form-item:last-child),
+:deep(.channel-secret-form .n-form-item:last-child) {
+  margin-bottom: 0;
+}
+
 @media (max-width: 900px) {
   .toolbar-actions {
     flex-wrap: wrap;
@@ -826,9 +884,38 @@ onMounted(() => {
     margin-left: 0;
   }
 
+  .thanks-panel {
+    padding: 12px 12px 10px;
+  }
+
+  .thanks-title-row {
+    gap: 8px;
+  }
+
   .channel-desc-panel {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  :deep(.n-collapse-item .n-collapse-item__header) {
+    padding: 9px 10px;
+  }
+
+  :deep(.n-collapse-item:first-child > .n-collapse-item__header) {
+    padding-top: 9px !important;
+  }
+
+  :deep(.n-collapse-item .n-collapse-item__content-inner) {
+    padding: 9px 10px 10px;
+  }
+
+  :deep(.channel-secret-form .n-input-group) {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  :deep(.channel-secret-form .n-input-group > .n-input) {
+    width: 100% !important;
   }
 
   .toolbar-actions {
