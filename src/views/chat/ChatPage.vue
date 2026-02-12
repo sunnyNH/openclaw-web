@@ -23,6 +23,7 @@ import {
 } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { RefreshOutline, SendOutline } from '@vicons/ionicons5'
+import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
@@ -33,6 +34,7 @@ import { renderSimpleMarkdown } from '@/utils/markdown'
 import type { ChatMessage, Skill } from '@/api/types'
 
 const message = useMessage()
+const route = useRoute()
 const chatStore = useChatStore()
 const configStore = useConfigStore()
 const sessionStore = useSessionStore()
@@ -41,7 +43,7 @@ const wsStore = useWebSocketStore()
 
 const sessionKeyInput = ref('')
 const draft = ref('')
-const roleFilter = ref<'all' | 'user' | 'assistant' | 'tool' | 'system'>('all')
+const roleFilter = ref<'all' | 'user' | 'assistant' | 'system'>('all')
 const autoFollowBottom = ref(true)
 const transcriptRef = ref<HTMLElement | null>(null)
 const quickReplySearch = ref('')
@@ -57,12 +59,12 @@ const roleFilterOptions: SelectOption[] = [
   { label: '全部角色', value: 'all' },
   { label: '仅用户', value: 'user' },
   { label: '仅助手', value: 'assistant' },
-  { label: '仅工具', value: 'tool' },
   { label: '仅系统', value: 'system' },
 ]
 
 const BOTTOM_GAP = 32
 const QUICK_REPLY_STORAGE_KEY = 'openclaw_chat_quick_replies_v1'
+const SESSION_KEY_STORAGE_KEY = 'openclaw_chat_selected_session_v1'
 let pendingForceScroll = false
 let pendingScroll = false
 let destroyed = false
@@ -92,10 +94,11 @@ const sessionChannelDisplay = computed(() => {
 })
 
 const messageList = computed(() => chatStore.messages)
+const visibleMessageList = computed(() => messageList.value.filter((item) => item.role !== 'tool'))
 const filteredMessages = computed(() => {
   const role = roleFilter.value
-  if (role === 'all') return messageList.value
-  return messageList.value.filter((item) => item.role === role)
+  if (role === 'all') return visibleMessageList.value
+  return visibleMessageList.value.filter((item) => item.role === role)
 })
 
 interface ToolCallItemView {
@@ -208,16 +211,14 @@ const syncTagType = computed<'default' | 'success' | 'warning' | 'info'>(() => {
 })
 
 const stats = computed(() => {
-  const list = messageList.value
+  const list = visibleMessageList.value
   let user = 0
   let assistant = 0
-  let tool = 0
   let system = 0
 
   for (const item of list) {
     if (item.role === 'user') user += 1
     else if (item.role === 'assistant') assistant += 1
-    else if (item.role === 'tool') tool += 1
     else if (item.role === 'system') system += 1
   }
 
@@ -226,7 +227,6 @@ const stats = computed(() => {
     total: list.length,
     user,
     assistant,
-    tool,
     system,
     lastMessageAt: last?.timestamp ? formatRelativeTime(last.timestamp) : '-',
   }
@@ -520,9 +520,29 @@ function ensureSessionKey(): string {
   return normalized
 }
 
+function readStoredSessionKey(): string {
+  try {
+    return localStorage.getItem(SESSION_KEY_STORAGE_KEY)?.trim() || ''
+  } catch (error) {
+    console.warn('[ChatPage] 读取上次会话失败:', error)
+    return ''
+  }
+}
+
+function writeStoredSessionKey(key: string) {
+  const normalized = key.trim()
+  if (!normalized) return
+  try {
+    localStorage.setItem(SESSION_KEY_STORAGE_KEY, normalized)
+  } catch (error) {
+    console.warn('[ChatPage] 保存上次会话失败:', error)
+  }
+}
+
 async function loadHistoryForKey(rawKey: string, options?: { force?: boolean }) {
   const key = rawKey.trim() || 'main'
   sessionKeyInput.value = key
+  writeStoredSessionKey(key)
 
   const shouldSkip =
     !options?.force &&
@@ -538,7 +558,7 @@ async function loadHistoryForKey(rawKey: string, options?: { force?: boolean }) 
   requestScrollToBottom({ force: true })
 }
 
-function normalizeSessionSelectValue(value: string | number | null): string {
+function normalizeSessionSelectValue(value: string | number | null | undefined): string {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number') return String(value).trim()
   return ''
@@ -1335,7 +1355,7 @@ watch(slashCommandKeyword, () => {
 })
 
 const messageSignature = computed(() => {
-  const list = messageList.value
+  const list = visibleMessageList.value
   const last = list.length > 0 ? list[list.length - 1] : null
   const lastContentLength = last?.content ? last.content.length : 0
   return `${list.length}|${last?.id || ''}|${last?.role || ''}|${last?.timestamp || ''}|${lastContentLength}`
@@ -1383,9 +1403,19 @@ onMounted(async () => {
   )
 
   await sessionStore.fetchSessions()
+  const routeSessionKey = normalizeSessionSelectValue(
+    Array.isArray(route.query.session) ? route.query.session[0] : (route.query.session as string | number | null)
+  )
   const currentStoreKey = chatStore.sessionKey.trim()
+  const storedSessionKey = readStoredSessionKey()
+  if (!sessionKeyInput.value && routeSessionKey) {
+    sessionKeyInput.value = routeSessionKey
+  }
   if (!sessionKeyInput.value && currentStoreKey) {
     sessionKeyInput.value = currentStoreKey
+  }
+  if (!sessionKeyInput.value && storedSessionKey) {
+    sessionKeyInput.value = storedSessionKey
   }
 
   const firstSession = sessionStore.sessions[0]
@@ -1576,7 +1606,7 @@ async function handleSend() {
                   </NTag>
                 </NSpace>
                 <NText depth="3" style="font-size: 12px;">
-                  用户 {{ stats.user }} / 助手 {{ stats.assistant }} / 工具 {{ stats.tool }} / 系统 {{ stats.system }}
+                  用户 {{ stats.user }} / 助手 {{ stats.assistant }} / 系统 {{ stats.system }}
                 </NText>
               </NSpace>
 
@@ -1752,7 +1782,7 @@ async function handleSend() {
 
                     <NEmpty
                       v-else
-                      :description="messageList.length ? '当前筛选下无消息' : '暂无消息'"
+                      :description="visibleMessageList.length ? '当前筛选下无消息' : '暂无消息'"
                       style="padding: 72px 0;"
                     />
                   </div>

@@ -49,6 +49,7 @@ import type {
   CronUpsertParams,
 } from '@/api/types'
 import { formatDate, formatRelativeTime, truncate } from '@/utils/format'
+import { renderSimpleMarkdown } from '@/utils/markdown'
 
 type ScheduleKind = 'cron' | 'every' | 'at'
 type EveryUnit = 'minutes' | 'hours' | 'days'
@@ -193,6 +194,20 @@ const hasJobs = computed(() => cronStore.jobs.length > 0)
 const selectedJob = computed(() =>
   cronStore.jobs.find((job) => job.id === cronStore.selectedJobId) || null
 )
+
+const selectedJobPayloadText = computed(() => {
+  const payload = selectedJob.value?.payload
+  if (!payload) return ''
+  if (payload.kind === 'systemEvent') return payload.text || ''
+  if (payload.kind === 'agentTurn') return payload.message || ''
+  return ''
+})
+
+const selectedJobPayloadHtml = computed(() => {
+  const text = selectedJobPayloadText.value.trim()
+  if (!text) return ''
+  return renderSimpleMarkdown(text)
+})
 
 const orderedRuns = computed(() => [...cronStore.runs].sort((a, b) => b.ts - a.ts))
 
@@ -1077,15 +1092,12 @@ function jobRowProps(row: CronJob) {
             <NDivider style="margin: 14px 0 10px;" />
 
             <NText depth="3">执行内容</NText>
-            <div class="cron-detail-value cron-detail-block">
-              {{
-                selectedJob.payload?.kind === 'systemEvent'
-                  ? selectedJob.payload.text
-                  : selectedJob.payload?.kind === 'agentTurn'
-                    ? selectedJob.payload.message
-                    : '-'
-              }}
-            </div>
+            <div
+              v-if="selectedJobPayloadHtml"
+              class="cron-detail-value cron-detail-block cron-markdown"
+              v-html="selectedJobPayloadHtml"
+            ></div>
+            <div v-else class="cron-detail-value cron-detail-block">-</div>
 
             <div v-if="selectedJob.delivery" class="cron-delivery-block">
               <NText depth="3">投递策略</NText>
@@ -1491,6 +1503,71 @@ function jobRowProps(row: CronJob) {
 
 .cron-delivery-block {
   margin-top: 10px;
+}
+
+.cron-markdown {
+  white-space: normal;
+  line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.cron-markdown :deep(> :first-child) {
+  margin-top: 0;
+}
+
+.cron-markdown :deep(> :last-child) {
+  margin-bottom: 0;
+}
+
+.cron-markdown :deep(p) {
+  margin: 4px 0;
+}
+
+.cron-markdown :deep(ul),
+.cron-markdown :deep(ol) {
+  margin: 6px 0;
+  padding-left: 1.35em;
+}
+
+.cron-markdown :deep(li) {
+  margin: 2px 0;
+}
+
+.cron-markdown :deep(a) {
+  color: var(--link-color);
+  text-decoration: underline;
+  text-decoration-color: var(--link-underline);
+  text-underline-offset: 2px;
+}
+
+.cron-markdown :deep(a:hover) {
+  color: var(--link-color-hover);
+  text-decoration-color: var(--link-color-hover);
+}
+
+.cron-markdown :deep(code) {
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-code-bg);
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.cron-markdown :deep(pre) {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-pre-bg);
+  overflow-x: auto;
+}
+
+.cron-markdown :deep(pre code) {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .cron-error-alert {
