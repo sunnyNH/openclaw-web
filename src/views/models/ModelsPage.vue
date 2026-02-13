@@ -1837,28 +1837,45 @@ function handleCreateProviderClick() {
 
                 <NTabPane name="preview" tab="3. 保存预览">
                   <NSpace vertical :size="10">
-                    <NDescriptions bordered :column="1" size="small" label-placement="left">
-                      <NDescriptionsItem label="API 协议">
-                        <NTag size="small" :type="editChangePreview?.apiDiff.changed ? 'warning' : 'default'" :bordered="false">
-                          {{ editChangePreview?.apiDiff.before || '-' }} -> {{ editChangePreview?.apiDiff.after || '-' }}
-                        </NTag>
-                      </NDescriptionsItem>
-                      <NDescriptionsItem label="Base URL">
-                        <NTag size="small" :type="editChangePreview?.baseUrlDiff.changed ? 'warning' : 'default'" :bordered="false">
-                          {{ editChangePreview?.baseUrlDiff.before || '-' }} -> {{ editChangePreview?.baseUrlDiff.after || '-' }}
-                        </NTag>
-                      </NDescriptionsItem>
-                      <NDescriptionsItem label="模型数量">
-                        <NTag size="small" :type="editChangePreview?.modelDiff.changed ? 'warning' : 'default'" :bordered="false">
-                          {{ editChangePreview?.modelDiff.beforeCount || 0 }} -> {{ editChangePreview?.modelDiff.afterCount || 0 }}
-                        </NTag>
-                      </NDescriptionsItem>
-                      <NDescriptionsItem label="输入类型">
-                        <NTag size="small" :type="editChangePreview?.inputDiff.changed ? 'warning' : 'default'" :bordered="false">
-                          {{ editChangePreview?.inputDiff.before.join(', ') || '-' }} -> {{ editChangePreview?.inputDiff.after.join(', ') || '-' }}
-                        </NTag>
-                      </NDescriptionsItem>
-                      <NDescriptionsItem label="API Key">
+                    <div class="models-preview-grid">
+                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiDiff.changed }">
+                        <NText depth="3" class="models-preview-label">API 协议</NText>
+                        <div class="models-preview-diff">
+                          <code>{{ editChangePreview?.apiDiff.before || '-' }}</code>
+                          <span class="models-preview-arrow">→</span>
+                          <code>{{ editChangePreview?.apiDiff.after || '-' }}</code>
+                        </div>
+                      </div>
+
+                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.baseUrlDiff.changed }">
+                        <NText depth="3" class="models-preview-label">Base URL</NText>
+                        <div class="models-preview-diff models-preview-diff--block">
+                          <code>{{ editChangePreview?.baseUrlDiff.before || '-' }}</code>
+                          <span class="models-preview-arrow">→</span>
+                          <code>{{ editChangePreview?.baseUrlDiff.after || '-' }}</code>
+                        </div>
+                      </div>
+
+                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.modelDiff.changed }">
+                        <NText depth="3" class="models-preview-label">模型数量</NText>
+                        <div class="models-preview-diff">
+                          <code>{{ editChangePreview?.modelDiff.beforeCount || 0 }}</code>
+                          <span class="models-preview-arrow">→</span>
+                          <code>{{ editChangePreview?.modelDiff.afterCount || 0 }}</code>
+                        </div>
+                      </div>
+
+                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.inputDiff.changed }">
+                        <NText depth="3" class="models-preview-label">输入类型</NText>
+                        <div class="models-preview-diff models-preview-diff--block">
+                          <code>{{ editChangePreview?.inputDiff.before.join(', ') || '-' }}</code>
+                          <span class="models-preview-arrow">→</span>
+                          <code>{{ editChangePreview?.inputDiff.after.join(', ') || '-' }}</code>
+                        </div>
+                      </div>
+
+                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiKeyAction === 'overwrite' }">
+                        <NText depth="3" class="models-preview-label">API Key</NText>
                         <NTag
                           size="small"
                           :type="editChangePreview?.apiKeyAction === 'overwrite' ? 'warning' : 'default'"
@@ -1866,13 +1883,15 @@ function handleCreateProviderClick() {
                         >
                           {{ editChangePreview?.apiKeyAction === 'overwrite' ? '覆盖线上 Key' : '保持不变' }}
                         </NTag>
-                      </NDescriptionsItem>
-                      <NDescriptionsItem label="默认模型">
+                      </div>
+
+                      <div class="models-preview-card" :class="{ 'is-changed': !!editChangePreview?.inferredPrimary }">
+                        <NText depth="3" class="models-preview-label">默认模型</NText>
                         <NTag size="small" :type="editChangePreview?.inferredPrimary ? 'warning' : 'default'" :bordered="false">
                           {{ editChangePreview?.inferredPrimary || '不变' }}
                         </NTag>
-                      </NDescriptionsItem>
-                    </NDescriptions>
+                      </div>
+                    </div>
 
                     <NCollapse v-if="editChangePreview?.modelDiff.changed">
                       <NCollapseItem
@@ -1912,9 +1931,19 @@ function handleCreateProviderClick() {
                       </NCollapseItem>
                     </NCollapse>
 
-                    <NText depth="3" style="font-size: 12px;">
-                      将写入路径：{{ editChangePreview?.patchPaths.join('，') || '-' }}
-                    </NText>
+                    <div class="models-preview-paths">
+                      <NText depth="3" style="font-size: 12px;">将写入路径</NText>
+                      <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
+                        <NTag
+                          v-for="path in editChangePreview?.patchPaths || []"
+                          :key="`edit-path-${path}`"
+                          size="small"
+                          :bordered="false"
+                        >
+                          {{ path }}
+                        </NTag>
+                      </NSpace>
+                    </div>
 
                     <NAlert v-if="editChangePreview?.warnings.length" type="warning" :bordered="false">
                       <div v-for="(warning, index) in editChangePreview?.warnings" :key="index">
@@ -2054,41 +2083,48 @@ function handleCreateProviderClick() {
 
         <NTabPane name="preview" tab="3. 保存预览">
           <NSpace vertical :size="8">
-            <NDescriptions bordered :column="1" size="small" label-placement="left">
-              <NDescriptionsItem label="渠道 ID">
+            <div class="models-preview-grid">
+              <div class="models-preview-card" :class="{ 'is-changed': !!createChangePreview.providerId }">
+                <NText depth="3" class="models-preview-label">渠道 ID</NText>
                 <NTag size="small" :type="createChangePreview.providerExists ? 'error' : 'info'" :bordered="false">
                   {{ createChangePreview.providerId || '未填写' }}
                 </NTag>
-              </NDescriptionsItem>
-              <NDescriptionsItem label="API 协议">
-                <NTag size="small" :bordered="false">{{ createChangePreview.api }}</NTag>
-              </NDescriptionsItem>
-              <NDescriptionsItem label="Base URL">
-                <NTag size="small" :type="createChangePreview.baseUrl === '-' ? 'warning' : 'default'" :bordered="false">
-                  {{ createChangePreview.baseUrl }}
-                </NTag>
-              </NDescriptionsItem>
-              <NDescriptionsItem label="模型数量">
-                <NTag size="small" :type="createChangePreview.modelIds.length > 0 ? 'default' : 'warning'" :bordered="false">
-                  {{ createChangePreview.modelIds.length }}
-                </NTag>
-              </NDescriptionsItem>
-              <NDescriptionsItem label="输入类型">
-                <NTag size="small" :bordered="false">
-                  {{ createChangePreview.inputTypes.join(', ') }}
-                </NTag>
-              </NDescriptionsItem>
-              <NDescriptionsItem label="API Key">
+              </div>
+
+              <div class="models-preview-card">
+                <NText depth="3" class="models-preview-label">API 协议</NText>
+                <code>{{ createChangePreview.api }}</code>
+              </div>
+
+              <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.baseUrl !== '-' }">
+                <NText depth="3" class="models-preview-label">Base URL</NText>
+                <code>{{ createChangePreview.baseUrl }}</code>
+              </div>
+
+              <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.modelIds.length > 0 }">
+                <NText depth="3" class="models-preview-label">模型数量</NText>
+                <code>{{ createChangePreview.modelIds.length }}</code>
+              </div>
+
+              <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.inputTypes.length > 0 }">
+                <NText depth="3" class="models-preview-label">输入类型</NText>
+                <code>{{ createChangePreview.inputTypes.join(', ') }}</code>
+              </div>
+
+              <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.hasApiKey }">
+                <NText depth="3" class="models-preview-label">API Key</NText>
                 <NTag size="small" :type="createChangePreview.hasApiKey ? 'warning' : 'error'" :bordered="false">
                   {{ createChangePreview.hasApiKey ? '将写入（不回显）' : '未填写' }}
                 </NTag>
-              </NDescriptionsItem>
-              <NDescriptionsItem label="默认模型">
+              </div>
+
+              <div class="models-preview-card" :class="{ 'is-changed': !!createChangePreview.inferredPrimary }">
+                <NText depth="3" class="models-preview-label">默认模型</NText>
                 <NTag size="small" :type="createChangePreview.inferredPrimary ? 'warning' : 'default'" :bordered="false">
                   {{ createChangePreview.inferredPrimary || '不变' }}
                 </NTag>
-              </NDescriptionsItem>
-            </NDescriptions>
+              </div>
+            </div>
 
             <NCollapse v-if="createChangePreview.modelIds.length > 0">
               <NCollapseItem :title="`模型列表（${createChangePreview.modelIds.length}）`" name="create-model-list">
@@ -2105,9 +2141,19 @@ function handleCreateProviderClick() {
               </NCollapseItem>
             </NCollapse>
 
-            <NText depth="3" style="font-size: 12px;">
-              将写入路径：{{ createChangePreview.patchPaths.join('，') || '-' }}
-            </NText>
+            <div class="models-preview-paths">
+              <NText depth="3" style="font-size: 12px;">将写入路径</NText>
+              <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
+                <NTag
+                  v-for="path in createChangePreview.patchPaths"
+                  :key="`create-path-${path}`"
+                  size="small"
+                  :bordered="false"
+                >
+                  {{ path }}
+                </NTag>
+              </NSpace>
+            </div>
 
             <NAlert v-if="createChangePreview.warnings.length" type="warning" :bordered="false">
               <div v-for="(warning, index) in createChangePreview.warnings" :key="index">
@@ -2409,6 +2455,61 @@ function handleCreateProviderClick() {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.models-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.models-preview-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.models-preview-card.is-changed {
+  border-color: rgba(24, 160, 88, 0.5);
+  background: rgba(24, 160, 88, 0.08);
+}
+
+.models-preview-label {
+  font-size: 12px;
+}
+
+.models-preview-card code {
+  white-space: normal;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+.models-preview-diff {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.models-preview-diff--block {
+  align-items: flex-start;
+}
+
+.models-preview-arrow {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.models-preview-paths {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
 }
 
 .models-empty {
