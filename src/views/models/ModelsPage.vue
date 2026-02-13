@@ -99,6 +99,11 @@ type ConfiguredModelRow = {
   modelRef: string
 }
 
+type DefaultsModelsCatalogSnapshot = {
+  catalog: Record<string, unknown> | null
+  normalized: boolean
+}
+
 function splitModelRef(value: string): { providerId: string; modelId: string } | null {
   const modelRef = value.trim()
   const slashIndex = modelRef.indexOf('/')
@@ -113,6 +118,21 @@ function splitModelRef(value: string): { providerId: string; modelId: string } |
   }
 
   return { providerId, modelId }
+}
+
+function normalizeProviderIdForMatch(value: string): string {
+  const normalized = normalizeProviderId(value)
+  if (normalized === 'z.ai' || normalized === 'z-ai') return 'zai'
+  if (normalized === 'opencode-zen') return 'opencode'
+  if (normalized === 'qwen') return 'qwen-portal'
+  if (normalized === 'kimi-code') return 'kimi-coding'
+  return normalized
+}
+
+function isModelRefFromProvider(modelRef: string, providerId: string): boolean {
+  const parsed = splitModelRef(modelRef)
+  if (!parsed) return false
+  return normalizeProviderIdForMatch(parsed.providerId) === normalizeProviderIdForMatch(providerId)
 }
 
 function looksLikeProviderConfig(value: unknown): value is Record<string, unknown> {
@@ -151,6 +171,10 @@ function extractProviderEntries(config: unknown): Array<{
     provider: unknown
   ) => {
     if (!id || !looksLikeProviderConfig(provider)) return
+    const existing = registry.get(id)
+    if (existing && existing.pathPrefix === 'models.providers' && pathPrefix === 'models') {
+      return
+    }
     registry.set(id, {
       id,
       pathPrefix,
@@ -593,7 +617,8 @@ const editChangePreview = computed(() => {
   if (!existingProvider) return null
 
   const providerPrefix = providerPathPrefixMap.value[providerId] || 'models.providers'
-  const providerBasePath = `${providerPrefix}.${providerId}`
+  const providerBasePath = `models.providers.${providerId}`
+  const shouldMigrateLegacyProviderPath = providerPrefix === 'models'
   const existingApi = readProviderText(existingProvider, ['api', 'protocol', 'format']) || ''
   const nextApi = providerForm.api || '-'
   const existingBaseUrl = readProviderText(existingProvider, ['baseUrl', 'baseURL', 'base_url', 'url', 'endpoint']) || ''
@@ -630,6 +655,10 @@ const editChangePreview = computed(() => {
   if (willPatchApiKey) {
     warnings.push('将写入新的 API Key，保存后页面不会回显明文 Key')
     patchPaths.push(`${providerBasePath}.apiKey`)
+  }
+  if (shouldMigrateLegacyProviderPath) {
+    warnings.push('将自动迁移 legacy 渠道路径（models.<id> -> models.providers.<id>）')
+    patchPaths.push(`models.${providerId}`)
   }
 
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
@@ -795,7 +824,8 @@ const primaryModelDisplay = computed(() => {
 })
 
 const currentPrimaryProviderId = computed(() => {
-  const parsed = splitModelRef(primaryModelDisplay.value)
+  const resolvedModelRef = resolveModelRefFromConfigValue(primaryModelDisplay.value)
+  const parsed = resolvedModelRef ? splitModelRef(resolvedModelRef) : null
   return parsed?.providerId || ''
 })
 
@@ -1037,11 +1067,108 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return null
 }
 
-function readExistingDefaultsModelsCatalog(): Record<string, unknown> | null {
+function normalizeDefaultsModelCatalogEntry(entry: unknown, fallbackAlias: string): Record<string, unknown> {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return fallbackAlias ? { alias: fallbackAlias } : {}
+  }
+
+  const row = entry as Record<string, unknown>
+  const normalized: Record<string, unknown> = {}
+
+  if (typeof row.alias === 'string' && row.alias.trim()) {
+    normalized.alias = row.alias.trim()
+  } else if (fallbackAlias) {
+    normalized.alias = fallbackAlias
+  }
+  if (row.params && typeof row.params === 'object' && !Array.isArray(row.params)) {
+    normalized.params = row.params
+  }
+  if (typeof row.streaming === 'boolean') {
+    normalized.streaming = row.streaming
+  }
+
+  return normalized
+}
+
+function readExistingDefaultsModelsCatalog(): DefaultsModelsCatalogSnapshot {
   const agents = asRecord(configStore.config?.agents)
   const defaults = asRecord(agents?.defaults)
-  const models = asRecord(defaults?.models)
-  return models
+  const modelsRaw = defaults?.models
+
+  if (!modelsRaw) {
+    return { catalog: null, normalized: false }
+  }
+
+  if (Array.isArray(modelsRaw)) {
+    const next: Record<string, unknown> = {}
+    for (const item of collectModelRefsFromUnknown(modelsRaw, 'agents.defaults.models')) {
+      const parsed = splitModelRef(item.modelRef)
+      if (!parsed) continue
+      const modelRef = `${parsed.providerId}/${parsed.modelId}`
+      if (next[modelRef]) continue
+      next[modelRef] = { alias: parsed.modelId }
+    }
+    return { catalog: next, normalized: true }
+  }
+
+  const models = asRecord(modelsRaw)
+  if (!models) {
+    return { catalog: {}, normalized: true }
+  }
+
+  const next: Record<string, unknown> = {}
+  let normalized = false
+
+  for (const [rawModelRef, entry] of Object.entries(models)) {
+    const modelRef = rawModelRef.trim()
+    if (!modelRef) {
+      normalized = true
+      continue
+    }
+    const parsed = splitModelRef(modelRef)
+    const fallbackAlias = parsed?.modelId || modelRef
+    const normalizedEntry = normalizeDefaultsModelCatalogEntry(entry, fallbackAlias)
+    next[modelRef] = normalizedEntry
+
+    if (modelRef !== rawModelRef) {
+      normalized = true
+      continue
+    }
+    if (JSON.stringify(normalizedEntry) !== JSON.stringify(entry ?? {})) {
+      normalized = true
+    }
+  }
+
+  return { catalog: next, normalized }
+}
+
+function resolveModelRefFromConfigValue(
+  value: unknown,
+  defaultsModelsCatalog?: Record<string, unknown> | null
+): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  const parsed = splitModelRef(trimmed)
+  if (parsed) {
+    return `${parsed.providerId}/${parsed.modelId}`
+  }
+
+  const catalog = defaultsModelsCatalog ?? readExistingDefaultsModelsCatalog().catalog
+  if (!catalog) return null
+
+  const aliasKey = trimmed.toLowerCase()
+  for (const [modelRef, entry] of Object.entries(catalog)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const aliasRaw = (entry as Record<string, unknown>).alias
+    const alias = typeof aliasRaw === 'string' ? aliasRaw.trim() : ''
+    if (alias && alias.toLowerCase() === aliasKey) {
+      return modelRef
+    }
+  }
+
+  return null
 }
 
 function buildBootstrapDefaultsModelsCatalog(): Record<string, unknown> {
@@ -1062,11 +1189,12 @@ function buildMergedDefaultsModelsCatalog(
   entries: Array<{ modelRef: string; alias: string }>,
   options?: { createWhenMissing?: boolean }
 ): Record<string, unknown> | null {
-  const existing = readExistingDefaultsModelsCatalog()
+  const existingSnapshot = readExistingDefaultsModelsCatalog()
+  const existing = existingSnapshot.catalog
   if (!existing && !options?.createWhenMissing) return null
 
   const next: Record<string, unknown> = existing ? { ...existing } : buildBootstrapDefaultsModelsCatalog()
-  let changed = !existing && Object.keys(next).length > 0
+  let changed = existingSnapshot.normalized || (!existing && Object.keys(next).length > 0)
 
   for (const entry of entries) {
     const modelRef = entry.modelRef.trim()
@@ -1093,15 +1221,15 @@ function buildAllowlistEntriesFromProvider(
 }
 
 function buildDefaultsModelsCatalogWithoutProvider(providerId: string): Record<string, unknown> | null {
-  const existing = readExistingDefaultsModelsCatalog()
+  const existingSnapshot = readExistingDefaultsModelsCatalog()
+  const existing = existingSnapshot.catalog
   if (!existing) return null
 
-  const prefix = `${providerId.toLowerCase()}/`
   const next: Record<string, unknown> = {}
-  let changed = false
+  let changed = existingSnapshot.normalized
 
   for (const [modelRef, entry] of Object.entries(existing)) {
-    if (modelRef.trim().toLowerCase().startsWith(prefix)) {
+    if (isModelRefFromProvider(modelRef, providerId)) {
       changed = true
       continue
     }
@@ -1109,6 +1237,135 @@ function buildDefaultsModelsCatalogWithoutProvider(providerId: string): Record<s
   }
 
   return changed ? next : null
+}
+
+function buildDefaultsModelsCatalogSyncedForProvider(
+  providerId: string,
+  modelIds: string[],
+  options?: { createWhenMissing?: boolean }
+): Record<string, unknown> | null {
+  const existingSnapshot = readExistingDefaultsModelsCatalog()
+  const existing = existingSnapshot.catalog
+  if (!existing && !options?.createWhenMissing) return null
+
+  const base = existing ? { ...existing } : buildBootstrapDefaultsModelsCatalog()
+  const incomingEntries = buildAllowlistEntriesFromProvider(providerId, modelIds)
+  const incomingEntryMap = new Map(incomingEntries.map((entry) => [entry.modelRef, entry]))
+
+  const next: Record<string, unknown> = {}
+  let changed = existingSnapshot.normalized || (!existing && Object.keys(base).length > 0)
+
+  for (const [modelRef, entry] of Object.entries(base)) {
+    if (!isModelRefFromProvider(modelRef, providerId)) {
+      next[modelRef] = entry
+      continue
+    }
+
+    const incoming = incomingEntryMap.get(modelRef)
+    if (!incoming) {
+      changed = true
+      continue
+    }
+
+    const normalizedEntry = normalizeDefaultsModelCatalogEntry(entry, incoming.alias)
+    next[modelRef] = normalizedEntry
+    incomingEntryMap.delete(modelRef)
+    if (JSON.stringify(normalizedEntry) !== JSON.stringify(entry ?? {})) {
+      changed = true
+    }
+  }
+
+  for (const entry of incomingEntryMap.values()) {
+    next[entry.modelRef] = {
+      alias: entry.alias.trim() || entry.modelRef,
+    }
+    changed = true
+  }
+
+  return changed ? next : null
+}
+
+function filterModelRefArrayWithoutProvider(
+  value: unknown,
+  providerId: string,
+  defaultsModelsCatalog: Record<string, unknown> | null
+): { changed: boolean; value: string[] } {
+  if (!Array.isArray(value)) {
+    return { changed: false, value: [] }
+  }
+
+  const next: string[] = []
+  let changed = false
+
+  for (const rawItem of value) {
+    if (typeof rawItem !== 'string') {
+      changed = true
+      continue
+    }
+
+    const item = rawItem.trim()
+    if (!item) {
+      changed = true
+      continue
+    }
+    if (item !== rawItem) {
+      changed = true
+    }
+
+    const resolvedModelRef = resolveModelRefFromConfigValue(item, defaultsModelsCatalog)
+    if (resolvedModelRef && isModelRefFromProvider(resolvedModelRef, providerId)) {
+      changed = true
+      continue
+    }
+    next.push(item)
+  }
+
+  return { changed, value: next }
+}
+
+function buildProviderModelReferenceCleanupPatches(
+  providerId: string,
+  defaultsModelsCatalog: Record<string, unknown> | null
+): ConfigPatch[] {
+  const patches: ConfigPatch[] = []
+
+  const agents = asRecord(configStore.config?.agents)
+  const defaults = asRecord(agents?.defaults)
+  const defaultModel = asRecord(defaults?.model)
+  if (defaultModel) {
+    const primaryModelRef = resolveModelRefFromConfigValue(defaultModel.primary, defaultsModelsCatalog)
+    if (primaryModelRef && isModelRefFromProvider(primaryModelRef, providerId)) {
+      patches.push({ path: 'agents.defaults.model.primary', value: null })
+    }
+
+    const fallbacks = filterModelRefArrayWithoutProvider(defaultModel.fallbacks, providerId, defaultsModelsCatalog)
+    if (fallbacks.changed) {
+      patches.push({
+        path: 'agents.defaults.model.fallbacks',
+        value: fallbacks.value.length > 0 ? fallbacks.value : null,
+      })
+    }
+
+    const legacyFallback = filterModelRefArrayWithoutProvider(defaultModel.fallback, providerId, defaultsModelsCatalog)
+    if (legacyFallback.changed) {
+      patches.push({
+        path: 'agents.defaults.model.fallback',
+        value: legacyFallback.value.length > 0 ? legacyFallback.value : null,
+      })
+    }
+  }
+
+  return patches
+}
+
+function dedupeConfigPatchesByPath(patches: ConfigPatch[]): ConfigPatch[] {
+  const map = new Map<string, ConfigPatch>()
+  for (const patch of patches) {
+    const path = patch.path.trim()
+    if (!path) continue
+    map.set(path, { path, value: patch.value })
+  }
+  return Array.from(map.values())
 }
 
 function resetEditorForm() {
@@ -1298,6 +1555,7 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
     { path: `${providerPrefix}.${providerId}`, value: null },
   ]
 
+  const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
   const nextDefaultsModels = buildDefaultsModelsCatalogWithoutProvider(providerId)
   if (nextDefaultsModels) {
     patches.push({
@@ -1305,9 +1563,14 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
       value: Object.keys(nextDefaultsModels).length > 0 ? nextDefaultsModels : null,
     })
   }
+  patches.push(
+    ...buildProviderModelReferenceCleanupPatches(providerId, defaultsCatalogSnapshot.catalog)
+  )
+
+  const finalPatches = dedupeConfigPatchesByPath(patches)
 
   try {
-    await configStore.patchConfig(patches)
+    await configStore.patchConfig(finalPatches)
     if (selectedProviderId.value === providerId) {
       selectedProviderId.value = ''
     }
@@ -1479,13 +1742,9 @@ async function handleSaveProvider(confirmed = false) {
   }
 
   const providerPrefix = providerPathPrefixMap.value[providerId] || 'models.providers'
-  const providerBasePath = `${providerPrefix}.${providerId}`
-  const existingModelsRaw = existingProvider && typeof existingProvider === 'object' ? (existingProvider as Record<string, unknown>).models : undefined
-  const shouldWriteModelMap =
-    !!existingModelsRaw && typeof existingModelsRaw === 'object' && !Array.isArray(existingModelsRaw)
-  const modelsValue = shouldWriteModelMap
-    ? Object.fromEntries(finalModelIds.map((id) => [id, { id, name: id, input: [...inputTypes] }]))
-    : finalModelIds.map((id) => ({ id, name: id, input: [...inputTypes] }))
+  const providerBasePath = `models.providers.${providerId}`
+  const shouldMigrateLegacyProviderPath = providerPrefix === 'models'
+  const modelsValue = finalModelIds.map((id) => ({ id, name: id, input: [...inputTypes] }))
   const patches: ConfigPatch[] = [
     { path: 'models.mode', value: 'merge' },
     { path: `${providerBasePath}.api`, value: providerForm.api },
@@ -1495,14 +1754,16 @@ async function handleSaveProvider(confirmed = false) {
       value: modelsValue,
     },
   ]
+  if (shouldMigrateLegacyProviderPath) {
+    patches.push({ path: `models.${providerId}`, value: null })
+  }
   if (shouldPatchApiKey) {
     patches.push({ path: `${providerBasePath}.apiKey`, value: apiKey })
   }
 
-  const mergedDefaultsModels = buildMergedDefaultsModelsCatalog(
-    buildAllowlistEntriesFromProvider(providerId, finalModelIds),
-    { createWhenMissing: true }
-  )
+  const mergedDefaultsModels = buildDefaultsModelsCatalogSyncedForProvider(providerId, finalModelIds, {
+    createWhenMissing: true,
+  })
   if (mergedDefaultsModels) {
     patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
   }
@@ -1581,6 +1842,10 @@ async function handleCreateProvider(confirmed = false) {
     message.warning('新建渠道时必须填写 API Key')
     return
   }
+  if (modelIds.length === 0) {
+    message.warning('请先探测模型或手动填写模型 ID')
+    return
+  }
   if (!confirmed) {
     openSaveConfirm('create')
     return
@@ -1597,10 +1862,9 @@ async function handleCreateProvider(confirmed = false) {
     },
   ]
 
-  const mergedDefaultsModels = buildMergedDefaultsModelsCatalog(
-    buildAllowlistEntriesFromProvider(providerId, modelIds),
-    { createWhenMissing: true }
-  )
+  const mergedDefaultsModels = buildDefaultsModelsCatalogSyncedForProvider(providerId, modelIds, {
+    createWhenMissing: true,
+  })
   if (mergedDefaultsModels) {
     patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
   }
