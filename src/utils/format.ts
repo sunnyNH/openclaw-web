@@ -49,6 +49,14 @@ export function formatRelativeTime(date: string | number | Date): string {
 
   const now = Date.now()
   const diff = now - parsed.getTime()
+  if (diff < 0) {
+    const ahead = Math.abs(diff)
+    if (ahead < 60000) return '即将'
+    if (ahead < 3600000) return `${Math.ceil(ahead / 60000)} 分钟后`
+    if (ahead < 86400000) return `${Math.ceil(ahead / 3600000)} 小时后`
+    if (ahead < 2592000000) return `${Math.ceil(ahead / 86400000)} 天后`
+    return formatDate(date)
+  }
 
   if (diff < 60000) return '刚刚'
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
