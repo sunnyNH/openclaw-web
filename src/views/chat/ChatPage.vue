@@ -611,12 +611,15 @@ function looksLikeMarkdown(value: string): boolean {
   const text = value.replace(/\r\n/g, '\n')
   if (!text.trim()) return false
   if (/```[\s\S]*```/.test(text)) return true
+  if (/`[^`\n]+`/.test(text)) return true
   if (/\[[^\]]+]\((https?:\/\/[^)\s]+)\)/.test(text)) return true
-  if (/(^|\s)\*\*[^*\n]+\*\*(\s|$)/.test(text)) return true
-  if (/(^|\s)\*[^*\n]+\*(\s|$)/.test(text)) return true
+  if (/\*\*[^*\n]+\*\*/.test(text)) return true
+  if (/(^|[\s(（\[{【'"“‘])\*[^*\n]+\*(?=$|[\s)\]）}】'".,!?，。！？：:、”’])/u.test(text)) return true
   if (/^\s{0,3}#{1,6}\s+\S+/m.test(text)) return true
   if (/^\s{0,3}>\s+\S+/m.test(text)) return true
   if (/^\s{0,3}[-*+]\s+\S+/m.test(text)) return true
+  if (/^\s{0,3}\d{1,9}[.)]\s+\S+/m.test(text)) return true
+  if (/^\s{0,3}(?:[-*_]\s*){3,}$/m.test(text)) return true
   if (/^\s{0,3}[-*_]{3,}\s*$/m.test(text)) return true
   return false
 }
