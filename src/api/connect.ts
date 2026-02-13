@@ -59,7 +59,8 @@ export function buildConnectParams(token: string): ConnectParams {
     },
     role: 'operator',
     scopes: ['operator.read', 'operator.write', 'operator.admin'],
-    caps: [],
+    // 请求 tool-events 能力以接收 agent 工具流事件（用于前端实时状态提示/工具调用可视化）
+    caps: ['tool-events'],
     commands: [],
     permissions: {},
     auth: {

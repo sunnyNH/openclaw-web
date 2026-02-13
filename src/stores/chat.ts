@@ -3,6 +3,25 @@ import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
 import type { ChatMessage } from '@/api/types'
 
+type AgentPhase =
+  | 'idle'
+  | 'sending'
+  | 'waiting'
+  | 'thinking'
+  | 'tool'
+  | 'replying'
+  | 'done'
+  | 'aborted'
+  | 'error'
+
+interface AgentStatus {
+  phase: AgentPhase
+  runId: string | null
+  detail: string | null
+  updatedAtMs: number
+  sinceMs: number
+}
+
 export const useChatStore = defineStore('chat', () => {
   const sessionKey = ref('')
   const messages = ref<ChatMessage[]>([])
@@ -11,6 +30,13 @@ export const useChatStore = defineStore('chat', () => {
   const sending = ref(false)
   const lastError = ref<string | null>(null)
   const lastSyncedAt = ref<number | null>(null)
+  const agentStatus = ref<AgentStatus>({
+    phase: 'idle',
+    runId: null,
+    detail: null,
+    updatedAtMs: Date.now(),
+    sinceMs: Date.now(),
+  })
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let pollTimers: Array<ReturnType<typeof setTimeout>> = []
   let streamFlushRaf: number | null = null
@@ -18,8 +44,40 @@ export const useChatStore = defineStore('chat', () => {
 
   const wsStore = useWebSocketStore()
 
+  function setAgentStatusPhase(phase: AgentPhase, patch?: { runId?: string | null; detail?: string | null }) {
+    const now = Date.now()
+    const prev = agentStatus.value
+    const next: AgentStatus = {
+      ...prev,
+      phase,
+      runId: patch?.runId === undefined ? prev.runId : patch.runId,
+      detail: patch?.detail === undefined ? prev.detail : patch.detail,
+      updatedAtMs: now,
+      sinceMs: prev.phase === phase ? prev.sinceMs : now,
+    }
+
+    const unchanged =
+      prev.phase === next.phase &&
+      prev.runId === next.runId &&
+      prev.detail === next.detail
+    if (unchanged) return
+
+    agentStatus.value = next
+  }
+
+  function resetAgentStatus() {
+    agentStatus.value = {
+      phase: 'idle',
+      runId: null,
+      detail: null,
+      updatedAtMs: Date.now(),
+      sinceMs: Date.now(),
+    }
+  }
+
   function setSessionKey(key: string) {
     sessionKey.value = key.trim()
+    resetAgentStatus()
     pendingStreamMessages = []
     if (streamFlushRaf !== null) {
       cancelAnimationFrame(streamFlushRaf)
@@ -132,6 +190,12 @@ export const useChatStore = defineStore('chat', () => {
     return null
   }
 
+  function asString(value: unknown): string {
+    if (typeof value === 'string') return value
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+    return ''
+  }
+
   function asText(value: unknown): string {
     if (typeof value === 'string') return value
     if (typeof value === 'number' || typeof value === 'boolean') return String(value)
@@ -211,6 +275,14 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     return rawItems.map((item) => normalizeRealtimeMessage(item)).filter((item): item is ChatMessage => !!item)
+  }
+
+  function extractRunId(payload: unknown): string {
+    const row = asRecord(payload)
+    if (!row) return ''
+    const runId = asString(row.runId).trim()
+    if (runId) return runId
+    return ''
   }
 
   function mergeRealtimeMessages(
@@ -309,6 +381,159 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function handleAgentStatusEvent(eventName: string, payload: unknown) {
+    if (!sessionKey.value.trim()) return
+    const normalizedEvent = eventName.trim().toLowerCase()
+    if (!normalizedEvent) return
+
+    const keyInEvent = extractSessionKey(payload)
+    if (keyInEvent && keyInEvent !== sessionKey.value) {
+      return
+    }
+
+    const runIdInEvent = extractRunId(payload)
+    const activeRunId = agentStatus.value.runId
+    if (activeRunId && runIdInEvent && runIdInEvent !== activeRunId) {
+      return
+    }
+
+    const payloadRow = asRecord(payload)
+
+    if (normalizedEvent === 'chat' || normalizedEvent.startsWith('chat.')) {
+      const state = asString(payloadRow?.state).trim().toLowerCase()
+      if (state === 'delta') {
+        if (agentStatus.value.phase !== 'replying') {
+          setAgentStatusPhase('replying', {
+            runId: activeRunId || runIdInEvent || null,
+            detail: null,
+          })
+        }
+        return
+      }
+      if (state === 'final') {
+        setAgentStatusPhase('done', { runId: null, detail: null })
+        return
+      }
+      if (state === 'aborted') {
+        setAgentStatusPhase('aborted', { runId: null, detail: null })
+        return
+      }
+      if (state === 'error') {
+        const errorMessage = asString(payloadRow?.errorMessage).trim() || null
+        setAgentStatusPhase('error', { runId: null, detail: errorMessage })
+        return
+      }
+      return
+    }
+
+    if (normalizedEvent === 'agent' || normalizedEvent.startsWith('agent.')) {
+      // 新版 gateway 统一用 event=agent，payload.stream=lifecycle|assistant|tool|compaction
+      if (normalizedEvent === 'agent') {
+        const stream = asString(payloadRow?.stream).trim().toLowerCase()
+        const data = asRecord(payloadRow?.data) || {}
+        if (stream === 'lifecycle') {
+          const phase = asString(data.phase).trim().toLowerCase()
+          if (phase === 'start') {
+            if (agentStatus.value.phase !== 'thinking') {
+              setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: null })
+            }
+            return
+          }
+          if (phase === 'end') {
+            setAgentStatusPhase('done', { runId: null, detail: null })
+            return
+          }
+          if (phase === 'error') {
+            const errorText = asText(data.error).trim() || null
+            setAgentStatusPhase('error', { runId: null, detail: errorText })
+            return
+          }
+        }
+
+        if (stream === 'tool') {
+          const toolName = asString(data.name || data.tool || data.toolName).trim()
+          const toolPhase = asString(data.phase || data.state).trim().toLowerCase()
+          if (toolPhase === 'start' || toolPhase === 'update') {
+            if (agentStatus.value.phase !== 'tool' || agentStatus.value.detail !== (toolName || null)) {
+              setAgentStatusPhase('tool', {
+                runId: activeRunId || runIdInEvent || null,
+                detail: toolName || null,
+              })
+            }
+            return
+          }
+          if (toolPhase === 'result') {
+            // 工具结束后通常会继续思考/生成；这里只做一次轻量状态回落
+            if (agentStatus.value.phase === 'tool') {
+              setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: toolName ? `工具完成：${toolName}` : null })
+            }
+            return
+          }
+        }
+
+        if (stream === 'compaction') {
+          const phase = asString((data as Record<string, unknown>).phase).trim().toLowerCase()
+          if (phase === 'start') {
+            setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: '上下文压缩中...' })
+            return
+          }
+          if (phase === 'end') {
+            if (agentStatus.value.phase === 'thinking' && agentStatus.value.detail === '上下文压缩中...') {
+              setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: null })
+            }
+            return
+          }
+        }
+
+        if (stream === 'assistant') {
+          if (agentStatus.value.phase !== 'replying' && agentStatus.value.phase !== 'tool') {
+            // chat delta 可能因节流略晚于 agent assistant stream，这里做兜底提示
+            setAgentStatusPhase('replying', { runId: activeRunId || runIdInEvent || null, detail: null })
+          }
+          return
+        }
+
+        return
+      }
+
+      // 旧版/兼容事件名：agent.started / agent.thinking / agent.done
+      if (normalizedEvent === 'agent.started') {
+        setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: null })
+        return
+      }
+      if (normalizedEvent === 'agent.thinking') {
+        setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: null })
+        return
+      }
+      if (normalizedEvent === 'agent.done') {
+        setAgentStatusPhase('done', { runId: null, detail: null })
+        return
+      }
+    }
+
+    if (normalizedEvent.startsWith('tool.')) {
+      if (normalizedEvent === 'tool.call') {
+        const data = asRecord(payloadRow?.payload ?? payloadRow) || {}
+        const toolName = asString(data.name || data.tool || data.toolName).trim() || null
+        setAgentStatusPhase('tool', { runId: activeRunId || runIdInEvent || null, detail: toolName })
+        return
+      }
+      if (normalizedEvent === 'tool.result') {
+        setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: null })
+        return
+      }
+      return
+    }
+
+    if (normalizedEvent.startsWith('model.')) {
+      if (normalizedEvent === 'model.streaming') {
+        if (agentStatus.value.phase !== 'replying') {
+          setAgentStatusPhase('replying', { runId: activeRunId || runIdInEvent || null, detail: null })
+        }
+      }
+    }
+  }
+
   async function sendMessage(content: string, model?: string) {
     const text = content.trim()
     if (!text) return
@@ -317,6 +542,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const idempotencyKey = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    setAgentStatusPhase('sending', { runId: idempotencyKey, detail: null })
     const localMessage: ChatMessage = {
       id: idempotencyKey,
       role: 'user',
@@ -334,9 +560,15 @@ export const useChatStore = defineStore('chat', () => {
         model: model?.trim() || undefined,
         idempotencyKey,
       })
+      if (agentStatus.value.phase === 'sending' && agentStatus.value.runId === idempotencyKey) {
+        setAgentStatusPhase('waiting', { runId: idempotencyKey, detail: null })
+      }
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error)
       messages.value = messages.value.filter((item) => item.id !== idempotencyKey)
+      if (agentStatus.value.runId === idempotencyKey) {
+        setAgentStatusPhase('error', { runId: null, detail: lastError.value })
+      }
       throw error
     } finally {
       sending.value = false
@@ -351,9 +583,11 @@ export const useChatStore = defineStore('chat', () => {
     sending,
     lastError,
     lastSyncedAt,
+    agentStatus,
     setSessionKey,
     fetchHistory,
     handleRealtimeEvent,
+    handleAgentStatusEvent,
     clearTimers,
     sendMessage,
   }

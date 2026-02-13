@@ -356,6 +356,33 @@ const syncTagType = computed<'default' | 'success' | 'warning' | 'info'>(() => {
   return 'default'
 })
 
+const agentBusy = computed(() => {
+  const phase = chatStore.agentStatus.phase
+  return phase === 'sending' || phase === 'waiting' || phase === 'thinking' || phase === 'tool' || phase === 'replying'
+})
+
+const agentStatusTagType = computed<'default' | 'success' | 'warning' | 'info' | 'error'>(() => {
+  const phase = chatStore.agentStatus.phase
+  if (phase === 'replying' || phase === 'sending' || phase === 'waiting' || phase === 'thinking') return 'info'
+  if (phase === 'tool' || phase === 'aborted') return 'warning'
+  if (phase === 'done') return 'success'
+  if (phase === 'error') return 'error'
+  return 'default'
+})
+
+const agentStatusText = computed(() => {
+  const status = chatStore.agentStatus
+  if (status.phase === 'sending') return '消息发送中...'
+  if (status.phase === 'waiting') return '等待响应...'
+  if (status.phase === 'thinking') return status.detail ? status.detail : '思考中...'
+  if (status.phase === 'tool') return status.detail ? `调用工具：${status.detail}` : '调用工具中...'
+  if (status.phase === 'replying') return '回复中...'
+  if (status.phase === 'done') return '本轮完成'
+  if (status.phase === 'aborted') return '已停止'
+  if (status.phase === 'error') return status.detail ? `错误：${status.detail}` : '错误'
+  return '空闲'
+})
+
 const stats = computed(() => {
   const list = visibleMessageList.value
   let user = 0
@@ -1562,6 +1589,7 @@ onMounted(async () => {
           name.includes('chunk') ||
           name.includes('partial') ||
           looksLikeStreamingPayload(data.payload)
+        chatStore.handleAgentStatusEvent(eventName, data.payload)
         chatStore.handleRealtimeEvent(data.payload, {
           refreshHistory: false,
           streaming: isStreamingEvent,
@@ -1609,7 +1637,7 @@ async function handleRefreshChatData() {
 async function handleSend() {
   const content = draft.value.trim()
   if (!content) return
-  if (chatStore.sending) return
+  if (agentBusy.value) return
 
   try {
     const key = ensureSessionKey()
@@ -2053,6 +2081,18 @@ async function handleSend() {
                   </div>
                 </div>
 
+                <div class="chat-compose-status-line">
+                  <NTag
+                    size="small"
+                    :type="agentStatusTagType"
+                    :bordered="false"
+                    round
+                    class="chat-agent-status-tag"
+                  >
+                    {{ agentStatusText }}
+                  </NTag>
+                </div>
+
                 <NSpace justify="space-between" align="center">
                   <NText depth="3" style="font-size: 12px;">
                     当前发送到：{{ normalizedSessionKey }} ｜ Enter 发送，Shift+Enter 换行，Ctrl/Cmd+Enter 发送
@@ -2061,7 +2101,7 @@ async function handleSend() {
                     <NButton size="small" secondary :disabled="!draft" @click="draft = ''">
                       清空输入
                     </NButton>
-                    <NButton type="primary" :loading="chatStore.sending" @click="handleSend">
+                    <NButton type="primary" :loading="agentBusy" :disabled="agentBusy" @click="handleSend">
                       <template #icon><NIcon :component="SendOutline" /></template>
                       发送
                     </NButton>
@@ -2139,6 +2179,23 @@ async function handleSend() {
 .chat-token-chip__value {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.chat-compose-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.chat-agent-status-tag.n-tag {
+  max-width: 360px;
+}
+
+.chat-agent-status-tag :deep(.n-tag__content) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-side-card {
