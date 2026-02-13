@@ -18,6 +18,7 @@ import {
   NIcon,
   NInput,
   NModal,
+  NPopconfirm,
   NSelect,
   NSpace,
   NTabPane,
@@ -37,7 +38,6 @@ const wsStore = useWebSocketStore()
 const message = useMessage()
 
 const primaryModel = ref('')
-const customModelInput = ref('')
 const selectedProviderId = ref('')
 const providerSearch = ref('')
 const probing = ref(false)
@@ -559,23 +559,6 @@ const configuredModelRows = computed<ConfiguredModelRow[]>(() => {
   return Array.from(rowsMap.values()).sort((a, b) => a.modelRef.localeCompare(b.modelRef))
 })
 
-const configuredModelOptions = computed(() => {
-  const set = new Set<string>()
-  const options: Array<{ label: string; value: string }> = []
-
-  for (const row of configuredModelRows.value) {
-    if (set.has(row.modelRef)) continue
-    set.add(row.modelRef)
-    options.push({ label: row.modelRef, value: row.modelRef })
-  }
-
-  if (primaryModel.value && !set.has(primaryModel.value)) {
-    options.unshift({ label: primaryModel.value, value: primaryModel.value })
-  }
-
-  return options
-})
-
 const editingExistingProvider = computed(() => {
   const id = normalizeProviderId(providerForm.id || selectedProviderId.value)
   return !!id && !!providerMap.value[id]
@@ -651,7 +634,7 @@ const editChangePreview = computed(() => {
   let inferredPrimary = ''
   if (!currentPrimary && nextModelIds[0]) {
     inferredPrimary = `${providerId}/${nextModelIds[0]}`
-    patchPaths.push('models.primary', 'agents.defaults.model.primary')
+    patchPaths.push('agents.defaults.model.primary')
   }
 
   if (removedModelIds.length > 0) {
@@ -749,7 +732,7 @@ const createChangePreview = computed(() => {
   let inferredPrimary = ''
   if (!currentPrimary && providerId && modelIds[0]) {
     inferredPrimary = `${providerId}/${modelIds[0]}`
-    patchPaths.push('models.primary', 'agents.defaults.model.primary')
+    patchPaths.push('agents.defaults.model.primary')
   }
 
   if (patchPaths.length > 0) {
@@ -883,7 +866,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
   {
     title: '操作',
     key: 'actions',
-    width: 140,
+    width: 214,
     render(row) {
       const isPrimaryProvider = row.id === currentPrimaryProviderId.value
       return h(
@@ -905,6 +888,32 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
               onClick: () => handleUseProviderAsPrimary(row.id, row.modelIds),
             },
             { default: () => (isPrimaryProvider ? '默认中' : '设默认') }
+          ),
+          h(
+            NPopconfirm,
+            {
+              onPositiveClick: () => handleDeleteProvider(row.id),
+              positiveText: '删除',
+              negativeText: '取消',
+            },
+            {
+              trigger: () =>
+                h(
+                  NButton,
+                  {
+                    size: 'tiny',
+                    quaternary: true,
+                    type: 'error',
+                    disabled: isPrimaryProvider,
+                    onClick: (e: MouseEvent) => e.stopPropagation(),
+                  },
+                  { default: () => '删除' }
+                ),
+              default: () =>
+                isPrimaryProvider
+                  ? '当前默认渠道不可删除，请先切换默认模型。'
+                  : `确认删除渠道 ${row.id}？`,
+            }
           ),
         ]
       )
@@ -1011,14 +1020,29 @@ function readExistingDefaultsModelsCatalog(): Record<string, unknown> | null {
   return models
 }
 
+function buildBootstrapDefaultsModelsCatalog(): Record<string, unknown> {
+  const next: Record<string, unknown> = {}
+  for (const provider of providerSummaries.value) {
+    for (const modelId of provider.modelIds) {
+      const modelRef = `${provider.id}/${modelId}`.trim()
+      if (!modelRef) continue
+      next[modelRef] = {
+        alias: modelId || modelRef,
+      }
+    }
+  }
+  return next
+}
+
 function buildMergedDefaultsModelsCatalog(
-  entries: Array<{ modelRef: string; alias: string }>
+  entries: Array<{ modelRef: string; alias: string }>,
+  options?: { createWhenMissing?: boolean }
 ): Record<string, unknown> | null {
   const existing = readExistingDefaultsModelsCatalog()
-  if (!existing) return null
+  if (!existing && !options?.createWhenMissing) return null
 
-  const next: Record<string, unknown> = { ...existing }
-  let changed = false
+  const next: Record<string, unknown> = existing ? { ...existing } : buildBootstrapDefaultsModelsCatalog()
+  let changed = !existing && Object.keys(next).length > 0
 
   for (const entry of entries) {
     const modelRef = entry.modelRef.trim()
@@ -1042,6 +1066,25 @@ function buildAllowlistEntriesFromProvider(
     modelRef: `${providerId}/${modelId}`,
     alias: modelId,
   }))
+}
+
+function buildDefaultsModelsCatalogWithoutProvider(providerId: string): Record<string, unknown> | null {
+  const existing = readExistingDefaultsModelsCatalog()
+  if (!existing) return null
+
+  const prefix = `${providerId.toLowerCase()}/`
+  const next: Record<string, unknown> = {}
+  let changed = false
+
+  for (const [modelRef, entry] of Object.entries(existing)) {
+    if (modelRef.trim().toLowerCase().startsWith(prefix)) {
+      changed = true
+      continue
+    }
+    next[modelRef] = entry
+  }
+
+  return changed ? next : null
 }
 
 function resetEditorForm() {
@@ -1176,11 +1219,12 @@ async function savePrimaryModel(targetInput: string): Promise<void> {
           modelRef: `${parsedTarget.providerId}/${parsedTarget.modelId}`,
           alias: parsedTarget.modelId,
         },
-      ])
+      ], {
+        createWhenMissing: true,
+      })
     : null
 
   const patches: ConfigPatch[] = [
-    { path: 'models.primary', value: target },
     { path: 'agents.defaults.model.primary', value: target },
   ]
   if (mergedDefaultsModels) {
@@ -1190,7 +1234,6 @@ async function savePrimaryModel(targetInput: string): Promise<void> {
   try {
     await configStore.patchConfig(patches)
     primaryModel.value = target
-    customModelInput.value = ''
     message.success(`默认模型已保存：${target}`)
   } catch (error) {
     message.error(error instanceof Error ? error.message : '保存失败')
@@ -1210,6 +1253,44 @@ async function handleUseModelAsPrimary(modelRef: string) {
   const value = modelRef.trim()
   if (!value) return
   await savePrimaryModel(value)
+}
+
+async function handleDeleteProvider(providerIdInput: string): Promise<void> {
+  const providerId = normalizeProviderId(providerIdInput)
+  if (!providerId) return
+
+  if (providerId === currentPrimaryProviderId.value) {
+    message.warning('当前默认渠道不允许删除，请先切换默认模型')
+    return
+  }
+
+  if (!providerMap.value[providerId]) {
+    message.warning('渠道不存在或已删除')
+    return
+  }
+
+  const providerPrefix = providerPathPrefixMap.value[providerId] || 'models.providers'
+  const patches: ConfigPatch[] = [
+    { path: `${providerPrefix}.${providerId}`, value: null },
+  ]
+
+  const nextDefaultsModels = buildDefaultsModelsCatalogWithoutProvider(providerId)
+  if (nextDefaultsModels) {
+    patches.push({
+      path: 'agents.defaults.models',
+      value: Object.keys(nextDefaultsModels).length > 0 ? nextDefaultsModels : null,
+    })
+  }
+
+  try {
+    await configStore.patchConfig(patches)
+    if (selectedProviderId.value === providerId) {
+      selectedProviderId.value = ''
+    }
+    message.success(`已删除渠道：${providerId}`)
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '删除失败')
+  }
 }
 
 async function probeModelsFromProvider(baseUrl: string, apiKey: string, apiType: string): Promise<string[]> {
@@ -1395,7 +1476,8 @@ async function handleSaveProvider(confirmed = false) {
   }
 
   const mergedDefaultsModels = buildMergedDefaultsModelsCatalog(
-    buildAllowlistEntriesFromProvider(providerId, finalModelIds)
+    buildAllowlistEntriesFromProvider(providerId, finalModelIds),
+    { createWhenMissing: true }
   )
   if (mergedDefaultsModels) {
     patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
@@ -1404,7 +1486,6 @@ async function handleSaveProvider(confirmed = false) {
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
   if (!currentPrimary) {
     const inferredPrimary = `${providerId}/${finalModelIds[0]}`
-    patches.push({ path: 'models.primary', value: inferredPrimary })
     patches.push({ path: 'agents.defaults.model.primary', value: inferredPrimary })
   }
 
@@ -1493,7 +1574,8 @@ async function handleCreateProvider(confirmed = false) {
   ]
 
   const mergedDefaultsModels = buildMergedDefaultsModelsCatalog(
-    buildAllowlistEntriesFromProvider(providerId, modelIds)
+    buildAllowlistEntriesFromProvider(providerId, modelIds),
+    { createWhenMissing: true }
   )
   if (mergedDefaultsModels) {
     patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
@@ -1502,7 +1584,6 @@ async function handleCreateProvider(confirmed = false) {
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
   if (!currentPrimary) {
     const inferredPrimary = `${providerId}/${modelIds[0]}`
-    patches.push({ path: 'models.primary', value: inferredPrimary })
     patches.push({ path: 'agents.defaults.model.primary', value: inferredPrimary })
   }
 
@@ -1532,11 +1613,6 @@ function handleSaveProviderClick() {
 
 function handleCreateProviderClick() {
   void handleCreateProvider()
-}
-
-async function handleSavePrimaryModel() {
-  const target = customModelInput.value.trim() || primaryModel.value.trim()
-  await savePrimaryModel(target)
 }
 </script>
 
@@ -1580,26 +1656,6 @@ async function handleSavePrimaryModel() {
         </div>
       </div>
 
-      <div class="models-primary-editor">
-        <NText depth="3" style="font-size: 12px;">默认模型设置</NText>
-        <div class="models-primary-editor-grid">
-          <NSelect
-            v-model:value="primaryModel"
-            :options="configuredModelOptions"
-            filterable
-            tag
-            placeholder="选择默认模型（provider/model）"
-          />
-          <NInput
-            v-model:value="customModelInput"
-            placeholder="可选：直接输入默认模型（provider/model）"
-          />
-          <NButton type="primary" :loading="configStore.saving" @click="handleSavePrimaryModel">
-            <template #icon><NIcon :component="SaveOutline" /></template>
-            保存默认模型
-          </NButton>
-        </div>
-      </div>
     </NCard>
 
     <NCard title="渠道工作台" class="models-workbench-card">
@@ -2294,20 +2350,6 @@ async function handleSavePrimaryModel() {
   font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
-.models-primary-editor {
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 10px;
-  background: var(--bg-primary);
-}
-
-.models-primary-editor-grid {
-  margin-top: 8px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
 .models-workbench-card,
 .models-index-card {
   border-radius: var(--radius-lg);
@@ -2356,10 +2398,6 @@ async function handleSavePrimaryModel() {
 }
 
 @media (max-width: 900px) {
-  .models-primary-editor-grid {
-    grid-template-columns: 1fr;
-  }
-
   .models-panel-toolbar {
     flex-direction: column;
     align-items: stretch !important;
