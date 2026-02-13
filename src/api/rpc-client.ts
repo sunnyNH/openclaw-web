@@ -78,6 +78,87 @@ export class RPCClient {
     return fallback
   }
 
+  private resolveCountNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      return Math.floor(value)
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed)
+      }
+    }
+    return undefined
+  }
+
+  private resolveSessionMessageCount(row: Record<string, unknown>): number {
+    const directCandidates = [
+      row.messageCount,
+      row.message_count,
+      row.messagesCount,
+      row.messages_count,
+      row.turns,
+      row.turn_count,
+      row.totalMessages,
+      row.total_messages,
+      row.count,
+    ]
+    for (const candidate of directCandidates) {
+      const count = this.resolveCountNumber(candidate)
+      if (count !== undefined) {
+        return count
+      }
+    }
+
+    const listCandidates = [
+      row.messages,
+      row.transcript,
+      row.history,
+      row.items,
+    ]
+    for (const candidate of listCandidates) {
+      if (Array.isArray(candidate)) {
+        return candidate.length
+      }
+    }
+
+    const nestedRows = [
+      this.asRecord(row.messages),
+      this.asRecord(row.messageCounts),
+      this.asRecord(row.message_counts),
+      this.asRecord(row.stats),
+      this.asRecord(row.metrics),
+    ]
+    for (const nested of nestedRows) {
+      const count = this.resolveCountNumber(
+        nested.total ??
+          nested.count ??
+          nested.messages ??
+          nested.messageCount ??
+          nested.message_count
+      )
+      if (count !== undefined) {
+        return count
+      }
+    }
+
+    const usageRow = this.asRecord(row.usage)
+    const usageMessageCounts = this.asRecord(usageRow.messageCounts ?? usageRow.message_counts)
+    const usageCount = this.resolveCountNumber(
+      usageMessageCounts.total ??
+        usageMessageCounts.count ??
+        usageMessageCounts.messages ??
+        usageRow.messages ??
+        usageRow.messageCount ??
+        usageRow.message_count
+    )
+    if (usageCount !== undefined) {
+      return usageCount
+    }
+
+    return 0
+  }
+
   private asText(value: unknown): string {
     if (typeof value === 'string') return value
     if (typeof value === 'number' || typeof value === 'boolean') return String(value)
@@ -337,7 +418,7 @@ export class RPCClient {
       agentId: this.asString(row.agentId || row.agent || parsed.agentId, 'main'),
       channel,
       peer: this.asString(row.peer || row.user || row.recipient || row.subject || parsed.peer),
-      messageCount: this.asNumber(row.messageCount || row.messages || row.turns, 0),
+      messageCount: this.resolveSessionMessageCount(row),
       lastActivity: this.asString(row.lastActivity || row.updatedAt || row.lastSeen),
       model: this.asString(row.model || row.modelName) || undefined,
       tokenUsage,

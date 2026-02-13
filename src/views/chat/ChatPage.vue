@@ -193,6 +193,11 @@ const slashCommandPresets: SlashCommandPreset[] = [
     category: '模型与上下文',
     expectArgs: true,
   },
+  {
+    command: '/status',
+    description: '查看当前会话与系统状态',
+    category: '常用',
+  },
 ]
 const transcriptLoading = computed(() => chatStore.loading && messageList.value.length === 0)
 const refreshingChatData = computed(() => sessionStore.loading || chatStore.loading)
@@ -1879,7 +1884,7 @@ async function handleSend() {
                       {{ configStore.loading ? '正在读取配置模型...' : '没有匹配模型，或当前未配置模型。' }}
                     </template>
                     <template v-else>
-                      没有匹配命令，仅支持 /new、/skill、/model。
+                      没有匹配命令，仅支持 /new、/skill、/model、/status。
                     </template>
                   </div>
                 </div>

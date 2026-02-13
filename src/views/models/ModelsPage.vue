@@ -441,6 +441,8 @@ const providerPathPrefixMap = computed<Record<string, 'models.providers' | 'mode
   return map
 })
 
+const managedProviderIdSet = computed(() => new Set(providerEntries.value.map((entry) => entry.id)))
+
 const providerSummaries = computed(() => {
   const registry = new Map<
     string,
@@ -869,15 +871,20 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
     width: 214,
     render(row) {
       const isPrimaryProvider = row.id === currentPrimaryProviderId.value
+      const isManagedProvider = managedProviderIdSet.value.has(row.id)
       return h(
         NSpace,
         { size: 2, wrap: false },
         () => [
-          h(
-            NButton,
-            { size: 'tiny', quaternary: true, onClick: () => handleLoadProvider(row.id) },
-            { default: () => '编辑' }
-          ),
+          ...(isManagedProvider
+            ? [
+                h(
+                  NButton,
+                  { size: 'tiny', quaternary: true, onClick: () => handleLoadProvider(row.id) },
+                  { default: () => '编辑' }
+                ),
+              ]
+            : []),
           h(
             NButton,
             {
@@ -889,32 +896,36 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
             },
             { default: () => (isPrimaryProvider ? '默认中' : '设默认') }
           ),
-          h(
-            NPopconfirm,
-            {
-              onPositiveClick: () => handleDeleteProvider(row.id),
-              positiveText: '删除',
-              negativeText: '取消',
-            },
-            {
-              trigger: () =>
+          ...(isManagedProvider
+            ? [
                 h(
-                  NButton,
+                  NPopconfirm,
                   {
-                    size: 'tiny',
-                    quaternary: true,
-                    type: 'error',
-                    disabled: isPrimaryProvider,
-                    onClick: (e: MouseEvent) => e.stopPropagation(),
+                    onPositiveClick: () => handleDeleteProvider(row.id),
+                    positiveText: '删除',
+                    negativeText: '取消',
                   },
-                  { default: () => '删除' }
+                  {
+                    trigger: () =>
+                      h(
+                        NButton,
+                        {
+                          size: 'tiny',
+                          quaternary: true,
+                          type: 'error',
+                          disabled: isPrimaryProvider,
+                          onClick: (e: MouseEvent) => e.stopPropagation(),
+                        },
+                        { default: () => '删除' }
+                      ),
+                    default: () =>
+                      isPrimaryProvider
+                        ? '当前默认渠道不可删除，请先切换默认模型。'
+                        : `确认删除渠道 ${row.id}？`,
+                  }
                 ),
-              default: () =>
-                isPrimaryProvider
-                  ? '当前默认渠道不可删除，请先切换默认模型。'
-                  : `确认删除渠道 ${row.id}？`,
-            }
-          ),
+              ]
+            : []),
         ]
       )
     },
@@ -922,7 +933,13 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
 ]
 
 function providerRowProps(row: ProviderSummary) {
+  const isManagedProvider = managedProviderIdSet.value.has(row.id)
   const active = row.id === selectedProviderId.value
+  if (!isManagedProvider) {
+    return {
+      style: active ? 'cursor: default; background: rgba(32, 128, 240, 0.08);' : 'cursor: default;',
+    }
+  }
   return {
     style: active ? 'cursor: pointer; background: rgba(32, 128, 240, 0.08);' : 'cursor: pointer;',
     onClick: () => handleLoadProvider(row.id),
@@ -944,10 +961,17 @@ const configuredModelColumns: DataTableColumns<ConfiguredModelRow> = [
     key: 'actions',
     width: 120,
     render(row) {
+      const isPrimaryModel = row.modelRef === primaryModelDisplay.value
       return h(
         NButton,
-        { size: 'tiny', type: 'primary', tertiary: true, onClick: () => handleUseModelAsPrimary(row.modelRef) },
-        { default: () => '设为默认' }
+        {
+          size: 'tiny',
+          type: isPrimaryModel ? 'default' : 'primary',
+          tertiary: !isPrimaryModel,
+          disabled: isPrimaryModel,
+          onClick: () => handleUseModelAsPrimary(row.modelRef),
+        },
+        { default: () => (isPrimaryModel ? '默认中' : '设为默认') }
       )
     },
   },
@@ -1265,7 +1289,7 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
   }
 
   if (!providerMap.value[providerId]) {
-    message.warning('渠道不存在或已删除')
+    message.warning('该渠道来自模型白名单（如 agents.defaults.models），不支持删除')
     return
   }
 

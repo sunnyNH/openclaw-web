@@ -10,10 +10,69 @@ export const useSessionStore = defineStore('session', () => {
 
   const wsStore = useWebSocketStore()
 
+  function mergeMessageCountsFromUsage(baseSessions: Session[], usage: unknown): Session[] {
+    if (!Array.isArray(baseSessions) || baseSessions.length === 0) return baseSessions
+    if (!usage || typeof usage !== 'object') return baseSessions
+
+    const usageRow = usage as { sessions?: unknown[] }
+    const usageList = Array.isArray(usageRow.sessions) ? usageRow.sessions : []
+    if (usageList.length === 0) return baseSessions
+
+    const usageCountMap = new Map<string, number>()
+    for (const item of usageList) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as {
+        key?: unknown
+        usage?: { messageCounts?: { total?: unknown } }
+      }
+      const key = typeof row.key === 'string' ? row.key.trim() : ''
+      if (!key) continue
+
+      const totalRaw = row.usage?.messageCounts?.total
+      let total = 0
+      if (typeof totalRaw === 'number' && Number.isFinite(totalRaw)) {
+        total = Math.max(0, Math.floor(totalRaw))
+      } else if (typeof totalRaw === 'string' && totalRaw.trim()) {
+        const parsed = Number(totalRaw)
+        total = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0
+      }
+
+      if (total > 0) {
+        usageCountMap.set(key, total)
+      }
+    }
+
+    if (usageCountMap.size === 0) return baseSessions
+
+    return baseSessions.map((session) => {
+      const usageCount = usageCountMap.get(session.key)
+      if (usageCount === undefined || usageCount <= 0) return session
+      if (session.messageCount >= usageCount) return session
+      return {
+        ...session,
+        messageCount: usageCount,
+      }
+    })
+  }
+
   async function fetchSessions() {
     loading.value = true
     try {
-      sessions.value = await wsStore.rpc.listSessions()
+      const list = await wsStore.rpc.listSessions()
+      const hasMessageCount = list.some((item) => item.messageCount > 0)
+      if (hasMessageCount || list.length === 0) {
+        sessions.value = list
+        return
+      }
+
+      try {
+        const usage = await wsStore.rpc.getSessionsUsage({
+          limit: Math.max(200, list.length * 4),
+        })
+        sessions.value = mergeMessageCountsFromUsage(list, usage)
+      } catch {
+        sessions.value = list
+      }
     } catch (error) {
       sessions.value = []
       console.error('[SessionStore] fetchSessions failed:', error)
