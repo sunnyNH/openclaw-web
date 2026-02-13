@@ -154,23 +154,22 @@ function formatTokenCount(value: number): string {
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Math.max(0, value))
 }
 
-const sessionTokenUsageDisplay = computed(() => {
+const sessionTokenMetricTags = computed(() => {
   const usage = currentSessionTokenUsage.value
-  if (!usage) {
-    return sessionTokenUsageLoading.value ? 'Token 读取中...' : 'Token -'
-  }
+  if (!usage) return []
 
-  const input = formatTokenCount(usage.input)
-  const output = formatTokenCount(usage.output)
-  const total = formatTokenCount(usage.total)
-  const cacheRead = formatTokenCount(usage.cacheRead)
-  const cacheWrite = formatTokenCount(usage.cacheWrite)
-  if (usage.cacheRead > 0 || usage.cacheWrite > 0) {
-    return `Token 总 ${total}（入 ${input} / 出 ${output} / 缓读 ${cacheRead} / 缓写 ${cacheWrite}）`
-  }
-
-  return `Token 总 ${total}（入 ${input} / 出 ${output}）`
+  return [
+    { key: 'total', label: 'Token', value: formatTokenCount(usage.total), highlight: true },
+    { key: 'input', label: '入', value: formatTokenCount(usage.input), highlight: false },
+    { key: 'output', label: '出', value: formatTokenCount(usage.output), highlight: false },
+    { key: 'cacheRead', label: '缓读', value: formatTokenCount(usage.cacheRead), highlight: false },
+    { key: 'cacheWrite', label: '缓写', value: formatTokenCount(usage.cacheWrite), highlight: false },
+  ]
 })
+
+const sessionTokenStatusText = computed(() =>
+  sessionTokenUsageLoading.value ? 'Token 读取中...' : 'Token -'
+)
 
 function resolveUsageSession(sessions: SessionsUsageSession[], key: string): SessionsUsageSession | null {
   if (sessions.length === 0) return null
@@ -1633,8 +1632,22 @@ async function handleSend() {
     <NCard title="在线对话（工作台）" class="app-card">
       <template #header-extra>
         <NSpace :size="8" class="app-toolbar">
-          <NTag size="small" :bordered="false" round class="chat-toolbar-token">
-            {{ sessionTokenUsageDisplay }}
+          <div v-if="sessionTokenMetricTags.length" class="chat-token-metrics">
+            <NTag
+              v-for="metric in sessionTokenMetricTags"
+              :key="metric.key"
+              size="small"
+              :bordered="false"
+              round
+              class="chat-token-chip"
+              :class="{ 'chat-token-chip--total': metric.highlight }"
+            >
+              <span class="chat-token-chip__label">{{ metric.label }}</span>
+              <span class="chat-token-chip__value">{{ metric.value }}</span>
+            </NTag>
+          </div>
+          <NTag v-else size="small" :bordered="false" round class="chat-token-chip chat-token-chip--loading">
+            {{ sessionTokenStatusText }}
           </NTag>
           <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="refreshingChatData" @click="handleRefreshChatData">
             <template #icon><NIcon :component="RefreshOutline" /></template>
@@ -2097,11 +2110,35 @@ async function handleSend() {
 </template>
 
 <style scoped>
-.chat-toolbar-token {
-  max-width: min(62vw, 720px);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.chat-token-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.chat-token-chip.n-tag {
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.chat-token-chip--total.n-tag {
+  background: rgba(32, 128, 240, 0.12);
+}
+
+.chat-token-chip--loading.n-tag {
+  border: 1px dashed var(--border-color);
+}
+
+.chat-token-chip__label {
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.chat-token-chip__value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-side-card {
