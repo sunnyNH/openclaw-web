@@ -259,10 +259,15 @@ export class RPCClient {
   private normalizeSessionChannel(channel: string): string {
     const value = channel.trim().toLowerCase()
     if (!value) return 'main'
-    if (value === 'qqbot') return 'qq'
+    if (value === 'webchat') return 'main'
+    if (value === 'qq' || value === 'qqbot') return 'qqbot'
     if (value === 'feishu-china') return 'feishu'
     if (value === 'wecom-app') return 'wecom'
     return value
+  }
+
+  private isGenericSessionChannel(channel: string): boolean {
+    return !channel || channel === 'main' || channel === 'unknown'
   }
 
   private parseSessionKeyMeta(key: string): { agentId: string; channel: string; peer: string } {
@@ -386,9 +391,15 @@ export class RPCClient {
 
   private resolveSessionChannel(params: { primary: string; fallback: string }): string {
     const primary = this.normalizeSessionChannel(params.primary)
+    const fallback = this.normalizeSessionChannel(params.fallback)
+
+    // Session key usually encodes a concrete channel; prefer it over generic "main".
+    if (!this.isGenericSessionChannel(fallback) && this.isGenericSessionChannel(primary)) {
+      return fallback
+    }
+
     if (primary && primary !== 'unknown') return primary
 
-    const fallback = this.normalizeSessionChannel(params.fallback)
     if (fallback) return fallback
 
     return primary || 'main'

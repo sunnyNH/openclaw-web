@@ -89,8 +89,13 @@ const selectedSession = computed(() =>
 const sessionMeta = computed(() => parseSessionKey(normalizedSessionKey.value))
 const sessionChannelDisplay = computed(() => {
   const channel = selectedSession.value?.channel?.trim().toLowerCase() || ''
-  if (!channel || channel === 'unknown') return sessionMeta.value.channel
-  return channel
+  const parsedChannel = sessionMeta.value.channel?.trim().toLowerCase() || ''
+  const isGeneric = (value: string) => !value || value === 'main' || value === 'unknown'
+
+  if (!isGeneric(parsedChannel) && isGeneric(channel)) return parsedChannel
+  if (!isGeneric(channel)) return channel
+  if (parsedChannel && parsedChannel !== 'unknown') return parsedChannel
+  return 'main'
 })
 
 const messageList = computed(() => chatStore.messages)

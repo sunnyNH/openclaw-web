@@ -63,9 +63,11 @@ export function truncate(str: string, maxLength: number): string {
 }
 
 const SESSION_CHANNEL_ALIASES: Record<string, string> = {
-  qqbot: 'qq',
+  qq: 'qqbot',
+  qqbot: 'qqbot',
   'feishu-china': 'feishu',
   'wecom-app': 'wecom',
+  webchat: 'main',
 }
 
 function normalizeSessionChannel(raw: string): string {
