@@ -448,16 +448,34 @@ const configuredModelOptions = computed<ConfiguredModelOption[]>(() => {
   const refs = new Set<string>()
   const defaultsRaw = asRecord(configStore.config?.agents?.defaults)
   const defaultsModelRaw = asRecord(defaultsRaw?.model)
+  const allowlistedRefs = new Set<string>()
 
   collectConfiguredModelRefs(configStore.config?.models?.primary, refs)
   collectConfiguredModelRefs(configStore.config?.models?.fallback, refs)
   collectConfiguredModelRefs(defaultsRaw?.models, refs)
+  collectConfiguredModelRefs(defaultsRaw?.models, allowlistedRefs)
   collectConfiguredModelRefs(defaultsModelRaw?.primary, refs)
   collectConfiguredModelRefs(defaultsModelRaw?.fallback, refs)
   collectConfiguredModelRefs(defaultsModelRaw?.fallbacks, refs)
   collectConfiguredModelRefsFromProviders(configStore.config?.models?.providers, refs)
 
-  return Array.from(refs)
+  const finalRefs = new Set<string>()
+  if (allowlistedRefs.size > 0) {
+    for (const ref of refs) {
+      if (allowlistedRefs.has(ref)) {
+        finalRefs.add(ref)
+      }
+    }
+    for (const ref of allowlistedRefs) {
+      finalRefs.add(ref)
+    }
+  } else {
+    for (const ref of refs) {
+      finalRefs.add(ref)
+    }
+  }
+
+  return Array.from(finalRefs)
     .sort((a, b) => a.localeCompare(b))
     .map((ref) => splitModelRef(ref))
     .filter((item): item is ConfiguredModelOption => !!item)

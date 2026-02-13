@@ -1345,6 +1345,123 @@ export class RPCClient {
     return row as OpenClawConfig
   }
 
+  private cloneJsonValue<T>(value: T): T {
+    if (value === undefined) return value
+    return JSON.parse(JSON.stringify(value)) as T
+  }
+
+  private splitConfigPatchPath(path: string): string[] {
+    return path
+      .split('.')
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+  }
+
+  private setMergePatchValue(
+    target: Record<string, unknown>,
+    pathSegments: string[],
+    value: unknown
+  ): void {
+    if (pathSegments.length === 0) return
+
+    let cursor = target
+    for (let index = 0; index < pathSegments.length - 1; index += 1) {
+      const key = pathSegments[index]
+      if (!key) continue
+      const current = cursor[key]
+      if (!current || typeof current !== 'object' || Array.isArray(current)) {
+        cursor[key] = {}
+      }
+      cursor = cursor[key] as Record<string, unknown>
+    }
+
+    const leafKey = pathSegments[pathSegments.length - 1]
+    if (!leafKey) return
+    cursor[leafKey] = value === undefined ? null : this.cloneJsonValue(value)
+  }
+
+  private buildConfigPatchRaw(patches: ConfigPatch[]): string {
+    const payload: Record<string, unknown> = {}
+    for (const patch of patches) {
+      const path = this.asString(patch.path).trim()
+      if (!path) continue
+      const segments = this.splitConfigPatchPath(path)
+      this.setMergePatchValue(payload, segments, patch.value)
+    }
+    return JSON.stringify(payload)
+  }
+
+  private resolveConfigSnapshotMeta(payload: unknown): {
+    exists: boolean
+    hash: string | null
+    raw: string | null
+  } {
+    const row = this.asRecord(payload)
+    const candidates = [row, this.asRecord(row.payload), this.asRecord(row.data), this.asRecord(row.result)]
+
+    let exists = true
+    let hash: string | null = null
+    let raw: string | null = null
+
+    for (const candidate of candidates) {
+      if ('exists' in candidate) {
+        exists = this.asBoolean(candidate.exists, exists)
+      }
+
+      const candidateHash = this.asString(candidate.hash).trim()
+      if (candidateHash) {
+        hash = candidateHash
+      }
+
+      const candidateRaw = typeof candidate.raw === 'string' ? candidate.raw : ''
+      if (candidateRaw.trim()) {
+        raw = candidateRaw
+      }
+
+      if (hash) {
+        break
+      }
+    }
+
+    return {
+      exists,
+      hash,
+      raw,
+    }
+  }
+
+  private async hashTextSha256(text: string): Promise<string | null> {
+    if (!text.trim()) return null
+
+    const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
+    if (!cryptoApi?.subtle || typeof TextEncoder === 'undefined') {
+      return null
+    }
+
+    try {
+      const bytes = new TextEncoder().encode(text)
+      const digest = await cryptoApi.subtle.digest('SHA-256', bytes)
+      return Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('')
+    } catch {
+      return null
+    }
+  }
+
+  private shouldFallbackToLegacyConfigPatch(message: string): boolean {
+    const normalized = message.toLowerCase()
+    if (!normalized.includes('config.patch')) return false
+
+    return (
+      normalized.includes("required property 'patches'") ||
+      normalized.includes('required property "patches"') ||
+      normalized.includes("unexpected property 'raw'") ||
+      normalized.includes('unexpected property "raw"') ||
+      normalized.includes('must not have additional properties')
+    )
+  }
+
   private normalizeChatHistoryPayload(payload: unknown): unknown[] {
     if (Array.isArray(payload)) return payload
     if (!payload || typeof payload !== 'object') return []
@@ -1510,8 +1627,43 @@ export class RPCClient {
     return this.call<unknown>('config.get').then((payload) => this.normalizeConfigPayload(payload))
   }
 
-  patchConfig(patches: ConfigPatch[]): Promise<void> {
-    return this.call('config.patch', { patches })
+  async patchConfig(patches: ConfigPatch[]): Promise<void> {
+    const normalized = patches
+      .map((item) => ({
+        path: this.asString(item.path).trim(),
+        value: item.value,
+      }))
+      .filter((item) => !!item.path)
+
+    if (normalized.length === 0) {
+      return
+    }
+
+    const snapshotPayload = await this.call<unknown>('config.get', {})
+    const snapshotMeta = this.resolveConfigSnapshotMeta(snapshotPayload)
+    let baseHash = snapshotMeta.hash
+    if (!baseHash && snapshotMeta.raw) {
+      baseHash = await this.hashTextSha256(snapshotMeta.raw)
+    }
+
+    const params: Record<string, unknown> = {
+      raw: this.buildConfigPatchRaw(normalized),
+    }
+
+    if (snapshotMeta.exists && baseHash) {
+      params.baseHash = baseHash
+    }
+
+    try {
+      await this.call('config.patch', params)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      if (this.shouldFallbackToLegacyConfigPatch(reason)) {
+        await this.call('config.patch', { patches: normalized })
+        return
+      }
+      throw error
+    }
   }
 
   applyConfig(): Promise<void> {

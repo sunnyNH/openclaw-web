@@ -28,10 +28,12 @@ import {
 } from 'naive-ui'
 import { AddOutline, RefreshOutline, SaveOutline, SearchOutline } from '@vicons/ionicons5'
 import { useConfigStore } from '@/stores/config'
+import { useWebSocketStore } from '@/stores/websocket'
 import type { DataTableColumns } from 'naive-ui'
-import type { ModelProviderConfig } from '@/api/types'
+import type { ConfigPatch, ModelProviderConfig } from '@/api/types'
 
 const configStore = useConfigStore()
+const wsStore = useWebSocketStore()
 const message = useMessage()
 
 const primaryModel = ref('')
@@ -48,11 +50,21 @@ const confirmActionType = ref<'edit' | 'create'>('edit')
 const editActiveTab = ref<'basic' | 'models' | 'preview'>('basic')
 const createActiveTab = ref<'basic' | 'models' | 'preview'>('basic')
 
+type ModelInputType = 'text' | 'image'
+
+const modelInputTypeOptions = [
+  { label: 'text', value: 'text' },
+  { label: 'image', value: 'image' },
+]
+
+const DEFAULT_MODEL_INPUT_TYPES: ModelInputType[] = ['text']
+
 const providerForm = reactive({
   id: '',
   api: 'openai-completions',
   baseUrl: '',
   apiKey: '',
+  modelInputTypes: [...DEFAULT_MODEL_INPUT_TYPES] as ModelInputType[],
   modelIdsText: '',
 })
 
@@ -61,6 +73,7 @@ const createProviderForm = reactive({
   api: 'openai-completions',
   baseUrl: '',
   apiKey: '',
+  modelInputTypes: [...DEFAULT_MODEL_INPUT_TYPES] as ModelInputType[],
   modelIdsText: '',
 })
 
@@ -181,6 +194,74 @@ function readProviderText(
     }
   }
   return ''
+}
+
+function readProviderApiKeyForProbe(provider: ModelProviderConfig | Record<string, unknown> | undefined): string {
+  const raw = readProviderText(provider, ['apiKey', 'api_key', 'key', 'token', 'accessToken', 'access_token'])
+  const value = raw.trim()
+  if (!value) return ''
+  if (/^[*•]+$/.test(value)) return ''
+  return value
+}
+
+function normalizeModelInputTypes(value: unknown): ModelInputType[] {
+  if (!Array.isArray(value)) return []
+  const allowed = new Set<ModelInputType>(['text', 'image'])
+  const normalized = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().toLowerCase())
+    .filter((item): item is ModelInputType => allowed.has(item as ModelInputType))
+  return Array.from(new Set(normalized)) as ModelInputType[]
+}
+
+function normalizeModelInputTypeSelection(types: ModelInputType[] | string[]): ModelInputType[] {
+  const normalized = normalizeModelInputTypes(types)
+  if (normalized.length > 0) {
+    return normalized
+  }
+  return [...DEFAULT_MODEL_INPUT_TYPES]
+}
+
+function isSameModelInputTypes(before: ModelInputType[], after: ModelInputType[]): boolean {
+  if (before.length !== after.length) return false
+  const beforeSorted = [...before].sort((a, b) => a.localeCompare(b))
+  const afterSorted = [...after].sort((a, b) => a.localeCompare(b))
+  return beforeSorted.every((item, index) => item === afterSorted[index])
+}
+
+function readProviderModelInputTypes(
+  provider: ModelProviderConfig | Record<string, unknown> | undefined
+): ModelInputType[] {
+  if (!provider) {
+    return [...DEFAULT_MODEL_INPUT_TYPES]
+  }
+  const row = provider as Record<string, unknown>
+  const result = new Set<ModelInputType>()
+
+  const collectFromModelEntry = (entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+    const model = entry as Record<string, unknown>
+    const inputs = normalizeModelInputTypes(model.input)
+    for (const input of inputs) {
+      result.add(input)
+    }
+  }
+
+  const models = row.models
+  if (Array.isArray(models)) {
+    for (const entry of models) {
+      collectFromModelEntry(entry)
+    }
+  } else if (models && typeof models === 'object') {
+    for (const entry of Object.values(models as Record<string, unknown>)) {
+      collectFromModelEntry(entry)
+    }
+  }
+
+  if (result.size > 0) {
+    return Array.from(result).sort((a, b) => a.localeCompare(b))
+  }
+  return [...DEFAULT_MODEL_INPUT_TYPES]
 }
 
 function readProviderModelIds(provider: ModelProviderConfig | Record<string, unknown> | undefined): string[] {
@@ -518,6 +599,8 @@ const apiKeyPlaceholder = computed(() =>
 
 const currentModelIds = computed(() => parseModelIds(providerForm.modelIdsText))
 const createCurrentModelIds = computed(() => parseModelIds(createProviderForm.modelIdsText))
+const currentModelInputTypes = computed(() => normalizeModelInputTypeSelection(providerForm.modelInputTypes))
+const createCurrentModelInputTypes = computed(() => normalizeModelInputTypeSelection(createProviderForm.modelInputTypes))
 const editChangePreview = computed(() => {
   if (!editingExistingProvider.value) return null
   const providerId = currentEditingProviderId.value
@@ -535,6 +618,9 @@ const editChangePreview = computed(() => {
   const nextModelIds = normalizeUniqueIds(
     currentModelIds.value.length > 0 ? currentModelIds.value : existingModelIds
   )
+  const existingInputTypes = readProviderModelInputTypes(existingProvider)
+  const nextInputTypes = currentModelInputTypes.value
+  const inputTypesChanged = !isSameModelInputTypes(existingInputTypes, nextInputTypes)
   const addedModelIds = nextModelIds.filter((id) => !existingModelIds.includes(id))
   const removedModelIds = existingModelIds.filter((id) => !nextModelIds.includes(id))
   const modelsChanged =
@@ -572,7 +658,13 @@ const editChangePreview = computed(() => {
     warnings.push('本次会移除部分已配置模型，请确认不会影响线上默认模型或路由规则')
   }
 
-  const hasChanges = apiChanged || baseUrlChanged || modelsChanged || willPatchApiKey || !!inferredPrimary
+  const hasChanges =
+    apiChanged ||
+    baseUrlChanged ||
+    modelsChanged ||
+    inputTypesChanged ||
+    willPatchApiKey ||
+    !!inferredPrimary
 
   return {
     providerId,
@@ -596,6 +688,11 @@ const editChangePreview = computed(() => {
       added: addedModelIds,
       removed: removedModelIds,
     },
+    inputDiff: {
+      changed: inputTypesChanged,
+      before: existingInputTypes,
+      after: nextInputTypes,
+    },
     apiKeyAction: willPatchApiKey ? 'overwrite' : 'keep',
     inferredPrimary: inferredPrimary || null,
   }
@@ -608,6 +705,7 @@ const createChangePreview = computed(() => {
   const baseUrl = createProviderForm.baseUrl.trim()
   const apiKey = createProviderForm.apiKey.trim()
   const modelIds = normalizeUniqueIds(createCurrentModelIds.value)
+  const inputTypes = createCurrentModelInputTypes.value
   const hasApiKey = !!apiKey
 
   const warnings: string[] = []
@@ -675,6 +773,7 @@ const createChangePreview = computed(() => {
     api,
     baseUrl: baseUrl || '-',
     modelIds,
+    inputTypes,
     hasApiKey,
     inferredPrimary: inferredPrimary || null,
   }
@@ -708,6 +807,11 @@ const primaryModelDisplay = computed(() => {
   if (current) return current
   const fromConfig = configStore.config?.models?.primary || configStore.config?.agents?.defaults?.model?.primary || ''
   return fromConfig || '-'
+})
+
+const currentPrimaryProviderId = computed(() => {
+  const parsed = splitModelRef(primaryModelDisplay.value)
+  return parsed?.providerId || ''
 })
 
 function sourceLabel(source: string): string {
@@ -781,6 +885,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
     key: 'actions',
     width: 140,
     render(row) {
+      const isPrimaryProvider = row.id === currentPrimaryProviderId.value
       return h(
         NSpace,
         { size: 2, wrap: false },
@@ -794,11 +899,12 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
             NButton,
             {
               size: 'tiny',
-              type: 'primary',
-              tertiary: true,
+              type: isPrimaryProvider ? 'default' : 'primary',
+              tertiary: !isPrimaryProvider,
+              disabled: isPrimaryProvider,
               onClick: () => handleUseProviderAsPrimary(row.id, row.modelIds),
             },
-            { default: () => '默认' }
+            { default: () => (isPrimaryProvider ? '默认中' : '设默认') }
           ),
         ]
       )
@@ -891,11 +997,59 @@ function normalizeUniqueIds(ids: string[]): string[] {
   ).sort((a, b) => a.localeCompare(b))
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return null
+}
+
+function readExistingDefaultsModelsCatalog(): Record<string, unknown> | null {
+  const agents = asRecord(configStore.config?.agents)
+  const defaults = asRecord(agents?.defaults)
+  const models = asRecord(defaults?.models)
+  return models
+}
+
+function buildMergedDefaultsModelsCatalog(
+  entries: Array<{ modelRef: string; alias: string }>
+): Record<string, unknown> | null {
+  const existing = readExistingDefaultsModelsCatalog()
+  if (!existing) return null
+
+  const next: Record<string, unknown> = { ...existing }
+  let changed = false
+
+  for (const entry of entries) {
+    const modelRef = entry.modelRef.trim()
+    if (!modelRef) continue
+    if (Object.prototype.hasOwnProperty.call(next, modelRef)) continue
+
+    next[modelRef] = {
+      alias: entry.alias.trim() || modelRef,
+    }
+    changed = true
+  }
+
+  return changed ? next : null
+}
+
+function buildAllowlistEntriesFromProvider(
+  providerId: string,
+  modelIds: string[]
+): Array<{ modelRef: string; alias: string }> {
+  return normalizeUniqueIds(modelIds).map((modelId) => ({
+    modelRef: `${providerId}/${modelId}`,
+    alias: modelId,
+  }))
+}
+
 function resetEditorForm() {
   providerForm.id = ''
   providerForm.api = 'openai-completions'
   providerForm.baseUrl = ''
   providerForm.apiKey = ''
+  providerForm.modelInputTypes = [...DEFAULT_MODEL_INPUT_TYPES]
   providerForm.modelIdsText = ''
   probeError.value = ''
 }
@@ -905,20 +1059,46 @@ function resetCreateProviderForm() {
   createProviderForm.api = 'openai-completions'
   createProviderForm.baseUrl = ''
   createProviderForm.apiKey = ''
+  createProviderForm.modelInputTypes = [...DEFAULT_MODEL_INPUT_TYPES]
   createProviderForm.modelIdsText = ''
   createProbeError.value = ''
 }
 
-function buildProbeUrls(baseUrl: string): string[] {
+function buildProbeUrls(baseUrl: string, apiType: string): string[] {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
   if (!trimmed) return []
 
-  const urls = [`${trimmed}/models`]
-  if (!/\/v1$/i.test(trimmed)) {
-    urls.push(`${trimmed}/v1/models`)
+  if (apiType === 'google-generative-ai') {
+    if (/\/models$/i.test(trimmed)) {
+      return [trimmed]
+    }
+    return [`${trimmed}/models`]
+  }
+
+  const urls = []
+  if (/\/models$/i.test(trimmed)) {
+    urls.push(trimmed)
+  } else {
+    urls.push(`${trimmed}/models`)
+    if (!/\/v1$/i.test(trimmed)) {
+      urls.push(`${trimmed}/v1/models`)
+    }
   }
 
   return Array.from(new Set(urls))
+}
+
+function appendApiKeyToUrl(url: string, apiKey: string): string {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.searchParams.has('key')) {
+      parsed.searchParams.set('key', apiKey)
+    }
+    return parsed.toString()
+  } catch {
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}key=${encodeURIComponent(apiKey)}`
+  }
 }
 
 function parseModelIdsFromPayload(payload: unknown): string[] {
@@ -959,6 +1139,7 @@ function loadProviderForm(providerId: string) {
   providerForm.id = providerId
   providerForm.api = readProviderText(provider, ['api', 'protocol', 'format']) || 'openai-completions'
   providerForm.baseUrl = readProviderText(provider, ['baseUrl', 'baseURL', 'base_url', 'url', 'endpoint']) || ''
+  providerForm.modelInputTypes = readProviderModelInputTypes(provider)
   // 不回显线上 Key，避免在 UI 里泄露；编辑时可重新输入覆盖
   providerForm.apiKey = ''
   providerForm.modelIdsText = readProviderModelIds(provider).join('\n')
@@ -981,44 +1162,82 @@ function handleLoadProvider(providerId: string) {
   editActiveTab.value = 'basic'
 }
 
-function handleUseProviderAsPrimary(providerId: string, modelIds: string[]) {
+async function savePrimaryModel(targetInput: string): Promise<void> {
+  const target = targetInput.trim()
+  if (!target) {
+    message.warning('请先选择或输入默认模型')
+    return
+  }
+
+  const parsedTarget = splitModelRef(target)
+  const mergedDefaultsModels = parsedTarget
+    ? buildMergedDefaultsModelsCatalog([
+        {
+          modelRef: `${parsedTarget.providerId}/${parsedTarget.modelId}`,
+          alias: parsedTarget.modelId,
+        },
+      ])
+    : null
+
+  const patches: ConfigPatch[] = [
+    { path: 'models.primary', value: target },
+    { path: 'agents.defaults.model.primary', value: target },
+  ]
+  if (mergedDefaultsModels) {
+    patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
+  }
+
+  try {
+    await configStore.patchConfig(patches)
+    primaryModel.value = target
+    customModelInput.value = ''
+    message.success(`默认模型已保存：${target}`)
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '保存失败')
+  }
+}
+
+async function handleUseProviderAsPrimary(providerId: string, modelIds: string[]) {
   if (modelIds.length === 0) {
     message.warning('该渠道没有可用模型，无法设置默认模型')
     return
   }
   const primary = `${providerId}/${modelIds[0]}`
-  primaryModel.value = primary
-  customModelInput.value = ''
-  message.success(`已选择默认模型：${primary}`)
+  await savePrimaryModel(primary)
 }
 
-function handleUseModelAsPrimary(modelRef: string) {
+async function handleUseModelAsPrimary(modelRef: string) {
   const value = modelRef.trim()
   if (!value) return
-  primaryModel.value = value
-  customModelInput.value = ''
-  message.success(`已选择默认模型：${value}`)
+  await savePrimaryModel(value)
 }
 
-async function probeModelsFromProvider(baseUrl: string, apiKey: string): Promise<string[]> {
-  const urls = buildProbeUrls(baseUrl)
+async function probeModelsFromProvider(baseUrl: string, apiKey: string, apiType: string): Promise<string[]> {
+  const urls = buildProbeUrls(baseUrl, apiType)
   if (urls.length === 0) {
     throw new Error('Base URL 不能为空')
   }
 
+  const isGoogleApi = apiType === 'google-generative-ai'
   let lastError: string | null = null
   for (const url of urls) {
     try {
-      const response = await fetch(url, {
+      const requestUrl = isGoogleApi ? appendApiKeyToUrl(url, apiKey) : url
+      const headers: Record<string, string> = {}
+      if (isGoogleApi) {
+        // Google 探测仅用 query key，尽量避免浏览器预检导致的 CORS 失败
+        headers.Accept = 'application/json'
+      } else {
+        headers.Authorization = `Bearer ${apiKey}`
+      }
+
+      const response = await fetch(requestUrl, {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
       })
 
       if (!response.ok) {
-        lastError = `${url} -> HTTP ${response.status}`
+        lastError = `${requestUrl} -> HTTP ${response.status}`
         continue
       }
 
@@ -1027,36 +1246,86 @@ async function probeModelsFromProvider(baseUrl: string, apiKey: string): Promise
       if (modelIds.length > 0) {
         return modelIds
       }
-      lastError = `${url} 返回成功，但未解析到模型列表`
+      lastError = `${requestUrl} 返回成功，但未解析到模型列表`
     } catch (error) {
-      lastError = `${url} 请求失败：${error instanceof Error ? error.message : String(error)}`
+      const reason = error instanceof Error ? error.message : String(error)
+      if (isGoogleApi && /failed to fetch/i.test(reason)) {
+        lastError = `${url} 请求失败：浏览器跨域限制（CORS）。请先保存渠道后在编辑态探测（走网关）或手动填写模型 ID。`
+      } else {
+        lastError = `${url} 请求失败：${reason}`
+      }
     }
   }
 
   throw new Error(lastError || '探测失败')
 }
 
+async function probeModelsFromGateway(providerId: string): Promise<string[]> {
+  const runtimeModels = await wsStore.rpc.listModels()
+  const ids = new Set<string>()
+
+  for (const item of runtimeModels) {
+    const rowProvider = (item.provider || '').trim()
+    const rowId = (item.id || '').trim()
+    if (!rowId) continue
+
+    const matchesProvider = rowProvider === providerId || rowId.startsWith(`${providerId}/`)
+    if (!matchesProvider) continue
+
+    const normalized = rowId.startsWith(`${providerId}/`)
+      ? rowId.slice(providerId.length + 1).trim()
+      : rowId
+    if (normalized) {
+      ids.add(normalized)
+    }
+  }
+
+  return Array.from(ids)
+}
+
 async function handleProbeModels() {
   const baseUrl = providerForm.baseUrl.trim()
-  const apiKey = providerForm.apiKey.trim()
+  const apiType = providerForm.api || 'openai-completions'
+  const providerId = currentEditingProviderId.value
+  const inputApiKey = providerForm.apiKey.trim()
+  const existingProviderKey = readProviderApiKeyForProbe(providerMap.value[currentEditingProviderId.value])
+  const apiKey = inputApiKey || existingProviderKey
   if (!baseUrl) {
     message.warning('请填写 Base URL')
     return
   }
   if (!apiKey) {
-    message.warning('请填写 API Key')
+    if (selectedProviderHasKey.value) {
+      message.warning('当前渠道 Key 已配置但不可读取，请手动输入一次用于探测')
+    } else {
+      message.warning('请填写 API Key')
+    }
     return
   }
 
   probing.value = true
   probeError.value = ''
   try {
-    const modelIds = await probeModelsFromProvider(baseUrl, apiKey)
+    const modelIds = await probeModelsFromProvider(baseUrl, apiKey, apiType)
     providerForm.modelIdsText = modelIds.join('\n')
     editActiveTab.value = 'models'
     message.success(`探测到 ${modelIds.length} 个模型`)
   } catch (error) {
-    probeError.value = error instanceof Error ? error.message : String(error)
+    const errorText = error instanceof Error ? error.message : String(error)
+    if (providerId) {
+      try {
+        const runtimeModelIds = await probeModelsFromGateway(providerId)
+        if (runtimeModelIds.length > 0) {
+          providerForm.modelIdsText = runtimeModelIds.join('\n')
+          editActiveTab.value = 'models'
+          message.success(`直连失败，已通过网关读取到 ${runtimeModelIds.length} 个模型`)
+          return
+        }
+      } catch {
+        // ignore, fallback to original error below
+      }
+    }
+    probeError.value = errorText
     message.error('模型探测失败')
   } finally {
     probing.value = false
@@ -1067,6 +1336,7 @@ async function handleSaveProvider(confirmed = false) {
   const providerId = normalizeProviderId(providerForm.id)
   const baseUrl = providerForm.baseUrl.trim()
   const apiKey = providerForm.apiKey.trim()
+  const inputTypes = currentModelInputTypes.value
   const modelIds = parseModelIds(providerForm.modelIdsText)
   const existingProvider = providerMap.value[providerId]
   const existingModelIds = readProviderModelIds(existingProvider)
@@ -1109,9 +1379,9 @@ async function handleSaveProvider(confirmed = false) {
   const shouldWriteModelMap =
     !!existingModelsRaw && typeof existingModelsRaw === 'object' && !Array.isArray(existingModelsRaw)
   const modelsValue = shouldWriteModelMap
-    ? Object.fromEntries(finalModelIds.map((id) => [id, { id, name: id }]))
-    : finalModelIds.map((id) => ({ id, name: id }))
-  const patches = [
+    ? Object.fromEntries(finalModelIds.map((id) => [id, { id, name: id, input: [...inputTypes] }]))
+    : finalModelIds.map((id) => ({ id, name: id, input: [...inputTypes] }))
+  const patches: ConfigPatch[] = [
     { path: 'models.mode', value: 'merge' },
     { path: `${providerBasePath}.api`, value: providerForm.api },
     { path: `${providerBasePath}.baseUrl`, value: baseUrl },
@@ -1122,6 +1392,13 @@ async function handleSaveProvider(confirmed = false) {
   ]
   if (shouldPatchApiKey) {
     patches.push({ path: `${providerBasePath}.apiKey`, value: apiKey })
+  }
+
+  const mergedDefaultsModels = buildMergedDefaultsModelsCatalog(
+    buildAllowlistEntriesFromProvider(providerId, finalModelIds)
+  )
+  if (mergedDefaultsModels) {
+    patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
   }
 
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
@@ -1145,6 +1422,7 @@ async function handleSaveProvider(confirmed = false) {
 
 async function handleProbeCreateProviderModels() {
   const baseUrl = createProviderForm.baseUrl.trim()
+  const apiType = createProviderForm.api || 'openai-completions'
   const apiKey = createProviderForm.apiKey.trim()
   if (!baseUrl) {
     message.warning('请填写 Base URL')
@@ -1158,12 +1436,13 @@ async function handleProbeCreateProviderModels() {
   probingCreateProvider.value = true
   createProbeError.value = ''
   try {
-    const modelIds = await probeModelsFromProvider(baseUrl, apiKey)
+    const modelIds = await probeModelsFromProvider(baseUrl, apiKey, apiType)
     createProviderForm.modelIdsText = modelIds.join('\n')
     createActiveTab.value = 'models'
     message.success(`探测到 ${modelIds.length} 个模型`)
   } catch (error) {
-    createProbeError.value = error instanceof Error ? error.message : String(error)
+    const reason = error instanceof Error ? error.message : String(error)
+    createProbeError.value = reason
     message.error('模型探测失败')
   } finally {
     probingCreateProvider.value = false
@@ -1174,6 +1453,7 @@ async function handleCreateProvider(confirmed = false) {
   const providerId = normalizeProviderId(createProviderForm.id)
   const baseUrl = createProviderForm.baseUrl.trim()
   const apiKey = createProviderForm.apiKey.trim()
+  const inputTypes = createCurrentModelInputTypes.value
   const modelIds = parseModelIds(createProviderForm.modelIdsText)
 
   if (!providerId) {
@@ -1196,25 +1476,28 @@ async function handleCreateProvider(confirmed = false) {
     message.warning('新建渠道时必须填写 API Key')
     return
   }
-  if (modelIds.length === 0) {
-    message.warning('请先探测模型或手动填写模型 ID')
-    return
-  }
   if (!confirmed) {
     openSaveConfirm('create')
     return
   }
 
-  const patches = [
+  const patches: ConfigPatch[] = [
     { path: 'models.mode', value: 'merge' },
     { path: `models.providers.${providerId}.api`, value: createProviderForm.api },
     { path: `models.providers.${providerId}.baseUrl`, value: baseUrl },
     { path: `models.providers.${providerId}.apiKey`, value: apiKey },
     {
       path: `models.providers.${providerId}.models`,
-      value: modelIds.map((id) => ({ id, name: id })),
+      value: modelIds.map((id) => ({ id, name: id, input: [...inputTypes] })),
     },
   ]
+
+  const mergedDefaultsModels = buildMergedDefaultsModelsCatalog(
+    buildAllowlistEntriesFromProvider(providerId, modelIds)
+  )
+  if (mergedDefaultsModels) {
+    patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
+  }
 
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
   if (!currentPrimary) {
@@ -1253,22 +1536,7 @@ function handleCreateProviderClick() {
 
 async function handleSavePrimaryModel() {
   const target = customModelInput.value.trim() || primaryModel.value.trim()
-  if (!target) {
-    message.warning('请先选择或输入默认模型')
-    return
-  }
-
-  try {
-    await configStore.patchConfig([
-      { path: 'models.primary', value: target },
-      { path: 'agents.defaults.model.primary', value: target },
-    ])
-    primaryModel.value = target
-    customModelInput.value = ''
-    message.success('默认模型已保存')
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : '保存失败')
-  }
+  await savePrimaryModel(target)
 }
 </script>
 
@@ -1411,12 +1679,17 @@ async function handleSavePrimaryModel() {
                       <NInput v-model:value="providerForm.baseUrl" placeholder="例如：https://api.openai.com/v1" />
                     </NFormItem>
                     <NFormItem label="API Key">
-                      <NInput
-                        v-model:value="providerForm.apiKey"
-                        type="password"
-                        show-password-on="click"
-                        :placeholder="apiKeyPlaceholder"
-                      />
+                      <NSpace vertical :size="6" style="width: 100%;">
+                        <NInput
+                          v-model:value="providerForm.apiKey"
+                          type="password"
+                          show-password-on="click"
+                          :placeholder="apiKeyPlaceholder"
+                        />
+                        <NText depth="3" style="font-size: 12px;">
+                          留空会保持线上 Key 不变；探测模型会优先使用已配置 Key（可读取时）。
+                        </NText>
+                      </NSpace>
                     </NFormItem>
                     <NFormItem label="Key 状态">
                       <NTag size="small" :bordered="false" :type="selectedProviderHasKey ? 'success' : 'default'">
@@ -1433,6 +1706,14 @@ async function handleSavePrimaryModel() {
 
                 <NTabPane name="models" tab="2. 模型管理">
                   <NForm label-placement="left" label-width="100">
+                    <NFormItem label="输入类型">
+                      <NSelect
+                        v-model:value="providerForm.modelInputTypes"
+                        :options="modelInputTypeOptions"
+                        multiple
+                        placeholder="选择该渠道模型支持的输入类型（可多选）"
+                      />
+                    </NFormItem>
                     <NFormItem label="模型列表">
                       <NInput
                         v-model:value="providerForm.modelIdsText"
@@ -1490,6 +1771,11 @@ async function handleSavePrimaryModel() {
                       <NDescriptionsItem label="模型数量">
                         <NTag size="small" :type="editChangePreview?.modelDiff.changed ? 'warning' : 'default'" :bordered="false">
                           {{ editChangePreview?.modelDiff.beforeCount || 0 }} -> {{ editChangePreview?.modelDiff.afterCount || 0 }}
+                        </NTag>
+                      </NDescriptionsItem>
+                      <NDescriptionsItem label="输入类型">
+                        <NTag size="small" :type="editChangePreview?.inputDiff.changed ? 'warning' : 'default'" :bordered="false">
+                          {{ editChangePreview?.inputDiff.before.join(', ') || '-' }} -> {{ editChangePreview?.inputDiff.after.join(', ') || '-' }}
                         </NTag>
                       </NDescriptionsItem>
                       <NDescriptionsItem label="API Key">
@@ -1637,6 +1923,14 @@ async function handleSavePrimaryModel() {
 
         <NTabPane name="models" tab="2. 模型管理">
           <NForm label-placement="left" label-width="100">
+            <NFormItem label="输入类型">
+              <NSelect
+                v-model:value="createProviderForm.modelInputTypes"
+                :options="modelInputTypeOptions"
+                multiple
+                placeholder="选择该渠道模型支持的输入类型（可多选）"
+              />
+            </NFormItem>
             <NFormItem label="模型列表">
               <NInput
                 v-model:value="createProviderForm.modelIdsText"
@@ -1697,6 +1991,11 @@ async function handleSavePrimaryModel() {
               <NDescriptionsItem label="模型数量">
                 <NTag size="small" :type="createChangePreview.modelIds.length > 0 ? 'default' : 'warning'" :bordered="false">
                   {{ createChangePreview.modelIds.length }}
+                </NTag>
+              </NDescriptionsItem>
+              <NDescriptionsItem label="输入类型">
+                <NTag size="small" :bordered="false">
+                  {{ createChangePreview.inputTypes.join(', ') }}
                 </NTag>
               </NDescriptionsItem>
               <NDescriptionsItem label="API Key">
@@ -1791,6 +2090,9 @@ async function handleSavePrimaryModel() {
             <NDescriptionsItem label="模型数量">
               {{ editChangePreview.modelDiff.beforeCount }} -> {{ editChangePreview.modelDiff.afterCount }}
             </NDescriptionsItem>
+            <NDescriptionsItem label="输入类型">
+              {{ editChangePreview.inputDiff.before.join(', ') || '-' }} -> {{ editChangePreview.inputDiff.after.join(', ') || '-' }}
+            </NDescriptionsItem>
             <NDescriptionsItem label="API Key">
               {{ editChangePreview.apiKeyAction === 'overwrite' ? '覆盖线上 Key' : '保持不变' }}
             </NDescriptionsItem>
@@ -1857,6 +2159,9 @@ async function handleSavePrimaryModel() {
             </NDescriptionsItem>
             <NDescriptionsItem label="模型数量">
               {{ createChangePreview.modelIds.length }}
+            </NDescriptionsItem>
+            <NDescriptionsItem label="输入类型">
+              {{ createChangePreview.inputTypes.join(', ') }}
             </NDescriptionsItem>
             <NDescriptionsItem label="API Key">
               {{ createChangePreview.hasApiKey ? '将写入（不回显）' : '未填写' }}
