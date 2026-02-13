@@ -31,7 +31,7 @@ import { useSkillStore } from '@/stores/skill'
 import { useWebSocketStore } from '@/stores/websocket'
 import { formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
-import type { ChatMessage, Skill } from '@/api/types'
+import type { ChatMessage, SessionsUsageSession, Skill } from '@/api/types'
 
 const message = useMessage()
 const route = useRoute()
@@ -86,6 +86,143 @@ const normalizedSessionKey = computed(() => sessionKeyInput.value.trim() || 'mai
 const selectedSession = computed(() =>
   sessionStore.sessions.find((session) => session.key === normalizedSessionKey.value) || null
 )
+type SessionTokenUsage = {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  total: number
+}
+
+const sessionTokenUsage = ref<SessionTokenUsage | null>(null)
+const sessionTokenUsageLoading = ref(false)
+let sessionTokenUsageRequestId = 0
+
+function normalizeTokenValue(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.round(value))
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.round(parsed))
+    }
+  }
+  return 0
+}
+
+function createSessionTokenUsage(params: {
+  input: unknown
+  output: unknown
+  cacheRead?: unknown
+  cacheWrite?: unknown
+  total?: unknown
+}): SessionTokenUsage {
+  const inputValue = normalizeTokenValue(params.input)
+  const outputValue = normalizeTokenValue(params.output)
+  const cacheReadValue = normalizeTokenValue(params.cacheRead)
+  const cacheWriteValue = normalizeTokenValue(params.cacheWrite)
+  const totalFromParts = inputValue + outputValue + cacheReadValue + cacheWriteValue
+  const totalValue = params.total === undefined
+    ? totalFromParts
+    : normalizeTokenValue(params.total)
+
+  return {
+    input: inputValue,
+    output: outputValue,
+    cacheRead: cacheReadValue,
+    cacheWrite: cacheWriteValue,
+    total: totalValue,
+  }
+}
+
+const sessionTokenUsageFromList = computed<SessionTokenUsage | null>(() => {
+  const tokenUsage = selectedSession.value?.tokenUsage
+  if (!tokenUsage) return null
+  return createSessionTokenUsage({
+    input: tokenUsage.totalInput,
+    output: tokenUsage.totalOutput,
+    total: tokenUsage.totalInput + tokenUsage.totalOutput,
+  })
+})
+
+const currentSessionTokenUsage = computed<SessionTokenUsage | null>(() =>
+  sessionTokenUsage.value || sessionTokenUsageFromList.value
+)
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Math.max(0, value))
+}
+
+const sessionTokenUsageDisplay = computed(() => {
+  const usage = currentSessionTokenUsage.value
+  if (!usage) {
+    return sessionTokenUsageLoading.value ? 'Token 读取中...' : 'Token -'
+  }
+
+  const input = formatTokenCount(usage.input)
+  const output = formatTokenCount(usage.output)
+  const total = formatTokenCount(usage.total)
+  const cacheRead = formatTokenCount(usage.cacheRead)
+  const cacheWrite = formatTokenCount(usage.cacheWrite)
+  if (usage.cacheRead > 0 || usage.cacheWrite > 0) {
+    return `Token 总 ${total}（入 ${input} / 出 ${output} / 缓读 ${cacheRead} / 缓写 ${cacheWrite}）`
+  }
+
+  return `Token 总 ${total}（入 ${input} / 出 ${output}）`
+})
+
+function resolveUsageSession(sessions: SessionsUsageSession[], key: string): SessionsUsageSession | null {
+  if (sessions.length === 0) return null
+  const normalized = key.trim()
+  return sessions.find((item) => item.key === normalized) || sessions[0] || null
+}
+
+async function fetchSessionTokenUsage(rawKey: string) {
+  const key = rawKey.trim()
+  sessionTokenUsageRequestId += 1
+  const requestId = sessionTokenUsageRequestId
+
+  if (!key) {
+    sessionTokenUsage.value = null
+    sessionTokenUsageLoading.value = false
+    return
+  }
+
+  sessionTokenUsage.value = null
+  sessionTokenUsageLoading.value = true
+
+  try {
+    const usageResult = await wsStore.rpc.getSessionsUsage({
+      key,
+      limit: 1,
+    })
+    if (requestId !== sessionTokenUsageRequestId) return
+
+    const usageSession = resolveUsageSession(usageResult.sessions || [], key)
+    if (!usageSession?.usage) {
+      sessionTokenUsage.value = null
+      return
+    }
+
+    sessionTokenUsage.value = createSessionTokenUsage({
+      input: usageSession.usage.input,
+      output: usageSession.usage.output,
+      cacheRead: usageSession.usage.cacheRead,
+      cacheWrite: usageSession.usage.cacheWrite,
+      total: usageSession.usage.totalTokens,
+    })
+  } catch (error) {
+    if (requestId !== sessionTokenUsageRequestId) return
+    sessionTokenUsage.value = null
+    console.warn('[ChatPage] 获取会话 token 用量失败:', error)
+  } finally {
+    if (requestId === sessionTokenUsageRequestId) {
+      sessionTokenUsageLoading.value = false
+    }
+  }
+}
+
 const sessionMeta = computed(() => parseSessionKey(normalizedSessionKey.value))
 const sessionChannelDisplay = computed(() => {
   const channel = selectedSession.value?.channel?.trim().toLowerCase() || ''
@@ -580,6 +717,7 @@ async function loadHistoryForKey(rawKey: string, options?: { force?: boolean }) 
   if (shouldSkip) return
 
   chatStore.setSessionKey(key)
+  void fetchSessionTokenUsage(key)
   await chatStore.fetchHistory(key)
   await nextTick()
   autoFollowBottom.value = true
@@ -1461,6 +1599,7 @@ onUnmounted(() => {
   eventCleanups.forEach((cleanup) => cleanup())
   chatStore.clearTimers()
   cancelPendingScroll()
+  sessionTokenUsageRequestId += 1
 })
 
 async function handleRefreshChatData() {
@@ -1477,6 +1616,7 @@ async function handleSend() {
     const key = ensureSessionKey()
     chatStore.setSessionKey(key)
     await chatStore.sendMessage(content)
+    void fetchSessionTokenUsage(key)
     draft.value = ''
     await nextTick()
     autoFollowBottom.value = true
@@ -1493,6 +1633,9 @@ async function handleSend() {
     <NCard title="在线对话（工作台）" class="app-card">
       <template #header-extra>
         <NSpace :size="8" class="app-toolbar">
+          <NTag size="small" :bordered="false" round class="chat-toolbar-token">
+            {{ sessionTokenUsageDisplay }}
+          </NTag>
           <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="refreshingChatData" @click="handleRefreshChatData">
             <template #icon><NIcon :component="RefreshOutline" /></template>
             刷新聊天数据
@@ -1954,6 +2097,13 @@ async function handleSend() {
 </template>
 
 <style scoped>
+.chat-toolbar-token {
+  max-width: min(62vw, 720px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-side-card {
   border-radius: var(--radius);
 }
