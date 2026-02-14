@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { NCard, NInput, NButton, NSpace, NText, NAlert } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +16,19 @@ const token = ref(authStore.token)
 const gatewayUrl = ref(authStore.gatewayUrl)
 const loading = ref(false)
 const error = ref('')
+
+const isHttpsPage = computed(() => {
+  if (typeof window === 'undefined') return false
+  return window.location.protocol === 'https:'
+})
+
+const gatewaySchemeHint = computed(() => {
+  const url = gatewayUrl.value.trim()
+  if (!url) return ''
+  if (!isHttpsPage.value) return ''
+  if (!url.toLowerCase().startsWith('ws://')) return ''
+  return '当前页面为 HTTPS，浏览器会拦截 ws:// WebSocket。请改用 wss:// 地址，或使用 SSH 隧道后连接 ws://127.0.0.1:18789。'
+})
 
 function buildGatewayUrl(url: string, tokenValue: string): string {
   try {
@@ -34,6 +47,11 @@ function buildGatewayUrl(url: string, tokenValue: string): string {
 async function handleLogin() {
   if (!token.value.trim()) {
     error.value = '请输入 Gateway Token'
+    return
+  }
+
+  if (gatewaySchemeHint.value) {
+    error.value = gatewaySchemeHint.value
     return
   }
 
@@ -150,6 +168,9 @@ async function handleLogin() {
                 placeholder="ws://127.0.0.1:18789"
                 :disabled="loading"
               />
+              <NAlert v-if="gatewaySchemeHint" type="warning" :bordered="false" style="margin-top: 10px;">
+                {{ gatewaySchemeHint }}
+              </NAlert>
             </div>
 
             <div>

@@ -22,7 +22,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
-import { RefreshOutline, SendOutline } from '@vicons/ionicons5'
+import { RefreshOutline, SendOutline, StopCircleOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useConfigStore } from '@/stores/config'
@@ -54,6 +54,10 @@ const quickReplyForm = reactive({
   title: '',
   content: '',
 })
+const showAgentDetails = ref(false)
+const aborting = ref(false)
+const nowMs = ref(Date.now())
+let nowTimer: ReturnType<typeof setInterval> | null = null
 
 const roleFilterOptions: SelectOption[] = [
   { label: '全部角色', value: 'all' },
@@ -358,11 +362,26 @@ const syncTagType = computed<'default' | 'success' | 'warning' | 'info'>(() => {
 
 const agentBusy = computed(() => {
   const phase = chatStore.agentStatus.phase
-  return phase === 'sending' || phase === 'waiting' || phase === 'thinking' || phase === 'tool' || phase === 'replying'
+  return (
+    phase === 'sending' ||
+    phase === 'waiting' ||
+    phase === 'thinking' ||
+    phase === 'tool' ||
+    phase === 'replying' ||
+    phase === 'aborting'
+  )
 })
 
 const agentBusyToolName = computed(() => {
   if (!agentBusy.value) return ''
+
+  const toolProgress = chatStore.toolProgress
+  if (toolProgress && toolProgress.phase !== 'result' && toolProgress.name.trim()) {
+    return toolProgress.name.trim()
+  }
+
+  const phase = chatStore.agentStatus.phase
+  if (phase === 'replying' || phase === 'aborting') return ''
 
   const runId = chatStore.agentStatus.runId
   const list = visibleMessageList.value
@@ -378,6 +397,11 @@ const agentBusyToolName = computed(() => {
     const structured = parseStructuredMessage(item.content)
     if (!structured) return ''
 
+    if (structured.toolCalls.length === 0) return ''
+    if (structured.toolResults.length >= structured.toolCalls.length) {
+      return ''
+    }
+
     const lastToolCall = structured.toolCalls[structured.toolCalls.length - 1]
     if (!lastToolCall?.name) return ''
     const normalized = lastToolCall.name.trim()
@@ -391,7 +415,7 @@ const agentStatusTagType = computed<'default' | 'success' | 'warning' | 'info' |
   if (agentBusyToolName.value) return 'warning'
   const phase = chatStore.agentStatus.phase
   if (phase === 'replying' || phase === 'sending' || phase === 'waiting' || phase === 'thinking') return 'info'
-  if (phase === 'tool' || phase === 'aborted') return 'warning'
+  if (phase === 'tool' || phase === 'aborting' || phase === 'aborted') return 'warning'
   if (phase === 'done') return 'success'
   if (phase === 'error') return 'error'
   return 'default'
@@ -405,11 +429,61 @@ const agentStatusText = computed(() => {
   if (status.phase === 'thinking') return status.detail ? status.detail : '思考中...'
   if (status.phase === 'tool') return status.detail ? `调用工具：${status.detail}` : '调用工具中...'
   if (status.phase === 'replying') return '回复中...'
+  if (status.phase === 'aborting') return '停止中...'
   if (status.phase === 'done') return '本轮完成'
   if (status.phase === 'aborted') return '已停止'
   if (status.phase === 'error') return status.detail ? `错误：${status.detail}` : '错误'
   return '空闲'
 })
+
+const hasAgentDetails = computed(() => {
+  if (agentBusy.value) return true
+  if (chatStore.agentSteps.length > 0) return true
+  if (chatStore.toolProgress) return true
+  return false
+})
+
+const toolElapsedMs = computed(() => {
+  const progress = chatStore.toolProgress
+  if (!progress) return 0
+  const endAt = progress.phase === 'result' ? progress.updatedAtMs : nowMs.value
+  return endAt - progress.startedAtMs
+})
+
+function formatClock(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '--:--:--'
+  return new Date(ts).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function formatDurationMs(ms: number): string {
+  const safe = Math.max(0, Math.floor(ms))
+  const totalSec = Math.floor(safe / 1000)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  if (min <= 0) return `${sec}s`
+  return `${min}m${String(sec).padStart(2, '0')}s`
+}
+
+async function handleAbort() {
+  if (aborting.value) return
+  if (!agentBusy.value) return
+
+  aborting.value = true
+  try {
+    await chatStore.abortActiveRun()
+    message.info('已发送停止请求')
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    message.error(`停止失败：${reason}`)
+  } finally {
+    aborting.value = false
+  }
+}
 
 const stats = computed(() => {
   const list = visibleMessageList.value
@@ -1594,6 +1668,10 @@ watch(
 )
 
 onMounted(async () => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+
   loadQuickReplies()
   void configStore.fetchConfig()
   void skillStore.fetchSkills()
@@ -1655,6 +1733,10 @@ onUnmounted(() => {
   chatStore.clearTimers()
   cancelPendingScroll()
   sessionTokenUsageRequestId += 1
+  if (nowTimer) {
+    clearInterval(nowTimer)
+    nowTimer = null
+  }
 })
 
 async function handleRefreshChatData() {
@@ -2110,15 +2192,80 @@ async function handleSend() {
                 </div>
 
                 <div class="chat-compose-status-line">
-                  <NTag
-                    size="small"
-                    :type="agentStatusTagType"
-                    :bordered="false"
-                    round
-                    class="chat-agent-status-tag"
-                  >
-                    {{ agentStatusText }}
-                  </NTag>
+                  <NSpace align="center" justify="space-between" style="width: 100%;">
+                    <NTag
+                      size="small"
+                      :type="agentStatusTagType"
+                      :bordered="false"
+                      round
+                      class="chat-agent-status-tag"
+                    >
+                      {{ agentStatusText }}
+                    </NTag>
+                    <NButton
+                      v-if="hasAgentDetails"
+                      size="tiny"
+                      text
+                      @click="showAgentDetails = !showAgentDetails"
+                    >
+                      {{ showAgentDetails ? '收起详情' : '详情' }}
+                    </NButton>
+                  </NSpace>
+                </div>
+
+                <div v-if="showAgentDetails && hasAgentDetails" class="chat-agent-details">
+                  <NSpace vertical :size="6">
+                    <NText depth="3" style="font-size: 12px;">
+                      当前阶段已持续 {{ formatDurationMs(nowMs - chatStore.agentStatus.sinceMs) }}
+                    </NText>
+
+                    <div v-if="chatStore.agentSteps.length" class="chat-agent-steps">
+                      <div v-for="(step, index) in chatStore.agentSteps" :key="`step-${step.ts}-${index}`" class="chat-agent-step">
+                        <span class="chat-agent-step__time">{{ formatClock(step.ts) }}</span>
+                        <span class="chat-agent-step__label">{{ step.label }}</span>
+                      </div>
+                    </div>
+
+                    <div v-if="chatStore.toolProgress" class="chat-tool-progress">
+                      <div class="chat-tool-progress__title">
+                        <span>工具：{{ chatStore.toolProgress.name }}</span>
+                        <span v-if="chatStore.toolProgress.meta" class="chat-tool-progress__meta">{{ chatStore.toolProgress.meta }}</span>
+                      </div>
+                      <div class="chat-tool-progress__kv">
+                        <span class="chat-tool-progress__k">调用 ID</span>
+                        <code class="chat-tool-progress__v">{{ chatStore.toolProgress.toolCallId }}</code>
+                        <span class="chat-tool-progress__k">阶段</span>
+                        <code class="chat-tool-progress__v">{{ chatStore.toolProgress.phase }}</code>
+                        <span class="chat-tool-progress__k">耗时</span>
+                        <code class="chat-tool-progress__v">
+                          {{ formatDurationMs(toolElapsedMs) }}
+                        </code>
+                      </div>
+
+                      <details v-if="chatStore.toolProgress.argsPreview" class="chat-tool-progress__details">
+                        <summary>查看入参</summary>
+                        <pre>{{ chatStore.toolProgress.argsPreview }}</pre>
+                      </details>
+
+                      <details v-if="chatStore.toolProgress.partialPreview" class="chat-tool-progress__details">
+                        <summary>查看 partialResult</summary>
+                        <pre>{{ chatStore.toolProgress.partialPreview }}</pre>
+                      </details>
+
+                      <details v-if="chatStore.toolProgress.resultPreview" class="chat-tool-progress__details">
+                        <summary>查看 result</summary>
+                        <pre>{{ chatStore.toolProgress.resultPreview }}</pre>
+                      </details>
+
+                      <NText
+                        v-if="chatStore.toolProgress.isError === true"
+                        depth="3"
+                        style="font-size: 12px; color: var(--danger-color);"
+                      >
+                        工具执行失败（已返回错误结果）
+                      </NText>
+                    </div>
+                  </NSpace>
                 </div>
 
                 <NSpace justify="space-between" align="center">
@@ -2129,7 +2276,19 @@ async function handleSend() {
                     <NButton size="small" secondary :disabled="!draft" @click="draft = ''">
                       清空输入
                     </NButton>
-                    <NButton type="primary" :loading="agentBusy" :disabled="agentBusy" @click="handleSend">
+                    <NButton
+                      v-if="agentBusy"
+                      size="small"
+                      type="warning"
+                      secondary
+                      :loading="aborting"
+                      :disabled="aborting"
+                      @click="handleAbort"
+                    >
+                      <template #icon><NIcon :component="StopCircleOutline" /></template>
+                      停止
+                    </NButton>
+                    <NButton size="small" type="primary" :loading="agentBusy" :disabled="agentBusy" @click="handleSend">
                       <template #icon><NIcon :component="SendOutline" /></template>
                       发送
                     </NButton>
@@ -2224,6 +2383,103 @@ async function handleSend() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-agent-details {
+  padding: 10px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+}
+
+.chat-agent-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.chat-agent-step {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chat-agent-step__time {
+  min-width: 74px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+
+.chat-agent-step__label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tool-progress__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chat-tool-progress__meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.chat-tool-progress__kv {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 6px 10px;
+  align-items: start;
+}
+
+.chat-tool-progress__k {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chat-tool-progress__v {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  word-break: break-all;
+}
+
+.chat-tool-progress__details {
+  margin-top: 8px;
+}
+
+.chat-tool-progress__details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chat-tool-progress__details pre {
+  margin-top: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 240px;
 }
 
 .chat-side-card {

@@ -28,6 +28,17 @@ const message = useMessage()
 const gatewayUrl = ref(authStore.gatewayUrl)
 const token = ref(authStore.token)
 const savingConnection = ref(false)
+const isHttpsPage = computed(() => {
+  if (typeof window === 'undefined') return false
+  return window.location.protocol === 'https:'
+})
+const gatewaySchemeHint = computed(() => {
+  const url = gatewayUrl.value.trim()
+  if (!url) return ''
+  if (!isHttpsPage.value) return ''
+  if (!url.toLowerCase().startsWith('ws://')) return ''
+  return '当前页面为 HTTPS，浏览器会拦截 ws:// WebSocket。请改用 wss:// 地址，或使用 SSH 隧道后连接 ws://127.0.0.1:18789。'
+})
 
 const themeOptions = [
   { label: '浅色模式', value: 'light' },
@@ -115,6 +126,9 @@ function handleThemeChange(mode: ThemeMode) {
         <NFormItem label="Gateway 地址">
           <NInput v-model:value="gatewayUrl" placeholder="ws://127.0.0.1:18789" />
         </NFormItem>
+        <NAlert v-if="gatewaySchemeHint" type="warning" :bordered="false" style="margin: -8px 0 16px;">
+          {{ gatewaySchemeHint }}
+        </NAlert>
         <NFormItem label="Token">
           <NInput v-model:value="token" type="password" show-password-on="click" placeholder="Gateway Token" />
         </NFormItem>
