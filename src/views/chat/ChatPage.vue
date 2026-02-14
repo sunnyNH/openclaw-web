@@ -361,7 +361,34 @@ const agentBusy = computed(() => {
   return phase === 'sending' || phase === 'waiting' || phase === 'thinking' || phase === 'tool' || phase === 'replying'
 })
 
+const agentBusyToolName = computed(() => {
+  if (!agentBusy.value) return ''
+
+  const runId = chatStore.agentStatus.runId
+  const list = visibleMessageList.value
+  let startIndex = 0
+  if (runId) {
+    const idx = list.findIndex((item) => item.id === runId)
+    if (idx >= 0) startIndex = idx + 1
+  }
+
+  for (let i = list.length - 1; i >= startIndex; i -= 1) {
+    const item = list[i]
+    if (item?.role !== 'assistant') continue
+    const structured = parseStructuredMessage(item.content)
+    if (!structured) return ''
+
+    const lastToolCall = structured.toolCalls[structured.toolCalls.length - 1]
+    if (!lastToolCall?.name) return ''
+    const normalized = lastToolCall.name.trim()
+    return normalized
+  }
+
+  return ''
+})
+
 const agentStatusTagType = computed<'default' | 'success' | 'warning' | 'info' | 'error'>(() => {
+  if (agentBusyToolName.value) return 'warning'
   const phase = chatStore.agentStatus.phase
   if (phase === 'replying' || phase === 'sending' || phase === 'waiting' || phase === 'thinking') return 'info'
   if (phase === 'tool' || phase === 'aborted') return 'warning'
@@ -371,6 +398,7 @@ const agentStatusTagType = computed<'default' | 'success' | 'warning' | 'info' |
 })
 
 const agentStatusText = computed(() => {
+  if (agentBusyToolName.value) return `调用工具：${agentBusyToolName.value}`
   const status = chatStore.agentStatus
   if (status.phase === 'sending') return '消息发送中...'
   if (status.phase === 'waiting') return '等待响应...'
