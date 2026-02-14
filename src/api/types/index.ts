@@ -368,3 +368,233 @@ export interface CostUsageSummary {
   daily: CostUsageDailyEntry[]
   totals: SessionsUsageTotals
 }
+
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+
+export interface LogEntry {
+  raw: string
+  time?: string | null
+  level?: LogLevel | null
+  subsystem?: string | null
+  message?: string | null
+  meta?: Record<string, unknown> | null
+}
+
+export interface LogsTailParams {
+  cursor?: number
+  limit?: number
+  maxBytes?: number
+}
+
+export interface LogsTailResult {
+  file: string
+  cursor: number
+  size: number
+  lines: string[]
+  truncated?: boolean
+  reset?: boolean
+}
+
+export interface SystemPresenceEntry {
+  instanceId?: string | null
+  host?: string | null
+  ip?: string | null
+  version?: string | null
+  platform?: string | null
+  deviceFamily?: string | null
+  modelIdentifier?: string | null
+  roles?: string[] | null
+  scopes?: string[] | null
+  mode?: string | null
+  lastInputSeconds?: number | null
+  reason?: string | null
+  tags?: string[] | null
+  text?: string | null
+  ts?: number | null
+  deviceId?: string | null
+}
+
+export type ExecApprovalsSecurity = 'deny' | 'allowlist' | 'full'
+export type ExecApprovalsAsk = 'off' | 'on-miss' | 'always'
+
+export interface ExecApprovalsDefaults {
+  security?: ExecApprovalsSecurity
+  ask?: ExecApprovalsAsk
+  askFallback?: ExecApprovalsSecurity
+  autoAllowSkills?: boolean
+}
+
+export interface ExecApprovalsAllowlistEntry {
+  id?: string
+  pattern: string
+  lastUsedAt?: number
+  lastUsedCommand?: string
+  lastResolvedPath?: string
+}
+
+export interface ExecApprovalsAgent extends ExecApprovalsDefaults {
+  allowlist?: ExecApprovalsAllowlistEntry[]
+}
+
+export interface ExecApprovalsFile {
+  version?: 1
+  socket?: {
+    path?: string
+    token?: string
+  }
+  defaults?: ExecApprovalsDefaults
+  agents?: Record<string, ExecApprovalsAgent>
+}
+
+export interface ExecApprovalsSnapshot {
+  path: string
+  exists: boolean
+  hash: string
+  file: ExecApprovalsFile
+}
+
+export interface UpdateRunStepResult {
+  name: string
+  command: string
+  cwd?: string
+  durationMs?: number
+  exitCode?: number | null
+  stdoutTail?: string | null
+  stderrTail?: string | null
+}
+
+export interface UpdateRunResult {
+  status: 'ok' | 'error' | 'skipped'
+  mode: 'git' | 'pnpm' | 'bun' | 'npm' | 'unknown'
+  root?: string
+  reason?: string
+  before?: {
+    sha?: string | null
+    version?: string | null
+  } | null
+  after?: {
+    sha?: string | null
+    version?: string | null
+  } | null
+  steps: UpdateRunStepResult[]
+  durationMs: number
+}
+
+export interface UpdateRunResponse {
+  ok: boolean
+  result?: UpdateRunResult
+  restart?: {
+    ok?: boolean
+    delayMs?: number
+    pid?: number
+    reason?: string
+    error?: string
+  } | null
+  sentinel?: {
+    path?: string | null
+    payload?: Record<string, unknown> | null
+  } | null
+}
+
+export interface HealthChannelAccountSummary {
+  accountId: string
+  configured?: boolean
+  linked?: boolean
+  authAgeMs?: number | null
+  probe?: unknown
+  lastProbeAt?: number | null
+  [key: string]: unknown
+}
+
+export interface HealthChannelSummary extends HealthChannelAccountSummary {
+  accounts?: Record<string, HealthChannelAccountSummary>
+}
+
+export interface HealthSessionsSummary {
+  path: string
+  count: number
+  recent: Array<{
+    key: string
+    updatedAt: number | null
+    age: number | null
+  }>
+}
+
+export interface HealthAgentSummary {
+  agentId: string
+  name?: string
+  isDefault: boolean
+  heartbeat: Record<string, unknown>
+  sessions: HealthSessionsSummary
+}
+
+export interface HealthSummary {
+  ok: true
+  ts: number
+  durationMs: number
+  channels: Record<string, HealthChannelSummary>
+  channelOrder: string[]
+  channelLabels: Record<string, string>
+  heartbeatSeconds: number
+  defaultAgentId: string
+  agents: HealthAgentSummary[]
+  sessions: HealthSessionsSummary
+}
+
+export interface StatusSessionStatus {
+  agentId?: string
+  key: string
+  kind: 'direct' | 'group' | 'global' | 'unknown'
+  sessionId?: string
+  updatedAt: number | null
+  age: number | null
+  thinkingLevel?: string
+  verboseLevel?: string
+  reasoningLevel?: string
+  elevatedLevel?: string
+  systemSent?: boolean
+  abortedLastRun?: boolean
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens: number | null
+  totalTokensFresh: boolean
+  remainingTokens: number | null
+  percentUsed: number | null
+  model: string | null
+  contextTokens: number | null
+  flags: string[]
+}
+
+export interface HeartbeatStatus {
+  agentId: string
+  enabled: boolean
+  every: string
+  everyMs: number | null
+}
+
+export interface StatusSummary {
+  linkChannel?: {
+    id: string
+    label: string
+    linked: boolean
+    authAgeMs: number | null
+  }
+  heartbeat: {
+    defaultAgentId: string
+    agents: HeartbeatStatus[]
+  }
+  channelSummary: string[]
+  queuedSystemEvents: string[]
+  sessions: {
+    paths: string[]
+    count: number
+    defaults: { model: string | null; contextTokens: number | null }
+    recent: StatusSessionStatus[]
+    byAgent: Array<{
+      agentId: string
+      path: string
+      count: number
+      recent: StatusSessionStatus[]
+    }>
+  }
+}

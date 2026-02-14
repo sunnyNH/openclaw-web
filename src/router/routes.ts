@@ -80,7 +80,7 @@ export const routes: RouteRecordRaw[] = [
         path: 'monitor',
         name: 'Monitor',
         component: () => import('@/views/monitor/MonitorPage.vue'),
-        meta: { title: 'Agent 监控', icon: 'PulseOutline', hidden: true },
+        meta: { title: '运维中心', icon: 'PulseOutline' },
       },
       {
         path: 'settings',

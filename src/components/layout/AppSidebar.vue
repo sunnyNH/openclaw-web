@@ -13,6 +13,7 @@ import {
   GitNetworkOutline,
   ExtensionPuzzleOutline,
   CogOutline,
+  PulseOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { routes } from '@/router/routes'
@@ -32,6 +33,7 @@ const iconMap: Record<string, unknown> = {
   GitNetworkOutline,
   ExtensionPuzzleOutline,
   CogOutline,
+  PulseOutline,
 }
 
 function renderIcon(iconName: string) {

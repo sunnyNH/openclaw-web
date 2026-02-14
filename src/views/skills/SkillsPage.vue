@@ -7,6 +7,7 @@ import {
   NGridItem,
   NButton,
   NSpace,
+  NSwitch,
   NTag,
   NText,
   NIcon,
@@ -64,46 +65,67 @@ function sourceType(source: Skill['source']): 'info' | 'success' | 'warning' {
 }
 
 const userPlugins = computed(() => skillStore.skills.filter((skill) => isUserPlugin(skill)))
-const visiblePlugins = computed(() => userPlugins.value.filter((skill) => matchesQuery(skill)))
-const workspaceTotalPlugins = computed(() =>
-  userPlugins.value.filter((skill) => skill.source === 'workspace')
+const visiblePlugins = computed(() => {
+  const base = skillStore.skills.filter((skill) => matchesQuery(skill))
+  if (skillStore.showBundled) return base
+  return base.filter((skill) => skill.source !== 'bundled')
+})
+const bundledAvailablePlugins = computed(() =>
+  skillStore.skills.filter(
+    (skill) => skill.source === 'bundled' && skill.eligible !== false && !skill.disabled
+  )
 )
-const workspacePlugins = computed(() =>
-  visiblePlugins.value.filter((skill) => skill.source === 'workspace')
-)
-const installedPlugins = computed(() =>
-  visiblePlugins.value.filter((skill) => skill.source === 'managed' || skill.source === 'extra')
-)
-const installedTotalPlugins = computed(() =>
-  userPlugins.value.filter((skill) => skill.source === 'managed' || skill.source === 'extra')
-)
-const bundledTotalPlugins = computed(() =>
-  skillStore.skills.filter((skill) => skill.source === 'bundled')
+const availableTotalPlugins = computed(
+  () => userPlugins.value.length + bundledAvailablePlugins.value.length
 )
 
-const pluginGroups = computed(() => [
-  {
-    key: 'workspace',
-    title: '我创建的插件',
-    description: '来自 workspace，本地维护',
-    emptyText: '当前没有用户创建插件',
-    skills: workspacePlugins.value,
-  },
-  {
-    key: 'installed',
-    title: '我安装的插件',
-    description: '来自托管源或额外目录，已被当前 OpenClaw 加载',
-    emptyText: '当前没有用户安装插件',
-    skills: installedPlugins.value,
-  },
-])
+const bundledPlugins = computed(() =>
+  visiblePlugins.value.filter(
+    (skill) => skill.source === 'bundled' && skill.eligible !== false && !skill.disabled
+  )
+)
+const userVisiblePlugins = computed(() =>
+  visiblePlugins.value.filter((skill) => isUserPlugin(skill))
+)
+
+const pluginGroups = computed(() => {
+  const groups = [
+    {
+      key: 'user',
+      title: '我创建的插件',
+      description: '来自 workspace / 托管源 / 额外目录',
+      emptyText: '当前没有用户插件',
+      skills: userVisiblePlugins.value,
+    },
+  ]
+
+  if (skillStore.showBundled) {
+    groups.push({
+      key: 'bundled',
+      title: '系统内置插件',
+      description: '随 OpenClaw 一起提供（可控制是否在 Chat 中可选）',
+      emptyText: '当前没有内置插件',
+      skills: bundledPlugins.value,
+    })
+  }
+
+  return groups
+})
 </script>
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="技能管理（我的插件）" class="app-card">
+    <NCard title="技能管理" class="app-card">
       <template #header-extra>
         <NSpace :size="8" class="app-toolbar">
+          <NSpace :size="8" align="center">
+            <NText depth="3" style="font-size: 12px;">显示内置</NText>
+            <NSwitch v-model:value="skillStore.showBundled" size="small" />
+          </NSpace>
+          <NSpace :size="8" align="center">
+            <NText depth="3" style="font-size: 12px;">Chat 显示内置</NText>
+            <NSwitch v-model:value="skillStore.showBundledInChat" size="small" />
+          </NSpace>
           <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="skillStore.fetchSkills()">
             <template #icon><NIcon :component="RefreshOutline" /></template>
             刷新
@@ -113,29 +135,29 @@ const pluginGroups = computed(() => [
 
       <NSpace vertical :size="14">
         <NAlert type="info" :show-icon="true" style="border-radius: var(--radius);">
-          仅展示 OpenClaw 用户自己创建与安装的插件，内置插件默认隐藏。
+          展示当前 Gateway 已加载的技能插件（含内置与用户插件），可通过开关控制内置插件展示与 Chat 可见性。
         </NAlert>
         <NAlert v-if="skillStore.error" type="error" :show-icon="true" style="border-radius: var(--radius);">
           技能数据加载失败：{{ skillStore.error }}
         </NAlert>
 
-        <NGrid cols="1 s:3" responsive="screen" :x-gap="12" :y-gap="12">
+        <NGrid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="12">
           <NGridItem>
             <NCard embedded :bordered="false" style="border-radius: var(--radius);">
-              <NText depth="3" style="font-size: 12px;">用户插件总数</NText>
-              <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ userPlugins.length }}</div>
+              <NText depth="3" style="font-size: 12px;">技能总数</NText>
+              <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ availableTotalPlugins }}</div>
+            </NCard>
+          </NGridItem>
+          <NGridItem>
+            <NCard embedded :bordered="false" style="border-radius: var(--radius);">
+              <NText depth="3" style="font-size: 12px;">系统内置（可用）</NText>
+              <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ bundledAvailablePlugins.length }}</div>
             </NCard>
           </NGridItem>
           <NGridItem>
             <NCard embedded :bordered="false" style="border-radius: var(--radius);">
               <NText depth="3" style="font-size: 12px;">我创建的插件</NText>
-              <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ workspaceTotalPlugins.length }}</div>
-            </NCard>
-          </NGridItem>
-          <NGridItem>
-            <NCard embedded :bordered="false" style="border-radius: var(--radius);">
-              <NText depth="3" style="font-size: 12px;">我安装的插件</NText>
-              <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ installedTotalPlugins.length }}</div>
+              <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ userPlugins.length }}</div>
             </NCard>
           </NGridItem>
         </NGrid>
@@ -143,9 +165,6 @@ const pluginGroups = computed(() => [
         <NInput v-model:value="searchQuery" clearable placeholder="搜索插件名称 / 描述 / 版本号">
           <template #prefix><NIcon :component="SearchOutline" /></template>
         </NInput>
-        <NText v-if="userPlugins.length === 0 && skillStore.skills.length > 0" depth="3" style="font-size: 12px;">
-          网关共返回 {{ skillStore.skills.length }} 个技能，其中内置 {{ bundledTotalPlugins.length }} 个。
-        </NText>
       </NSpace>
 
       <NSpin :show="skillStore.loading" style="margin-top: 16px;">
@@ -181,23 +200,32 @@ const pluginGroups = computed(() => [
                       </NSpace>
                     </NSpace>
 
-                    <NText v-if="skill.description" depth="3" style="font-size: 13px; line-height: 1.5;">
-                      {{ skill.description }}
+                    <NText depth="3" class="skill-desc">
+                      {{ skill.description || '暂无描述' }}
                     </NText>
-                    <NText v-else depth="3" style="font-size: 13px;">暂无描述</NText>
 
                     <NSpace justify="space-between" align="center">
                       <NText depth="3" style="font-size: 12px;">
                         {{ skill.version ? `v${skill.version}` : '未标注版本' }}
                       </NText>
-                      <NTag
-                        :type="skill.eligible === false ? 'warning' : 'success'"
-                        size="small"
-                        :bordered="false"
-                        round
-                      >
-                        {{ skill.eligible === false ? '缺依赖/受限' : '可用' }}
-                      </NTag>
+                      <NSpace :size="10" align="center">
+                        <NSpace :size="6" align="center">
+                          <NText depth="3" style="font-size: 12px;">Chat</NText>
+                          <NSwitch
+                            size="small"
+                            :value="skillStore.isSkillVisibleInChat(skill.name)"
+                            @update:value="(val) => skillStore.setSkillVisibleInChat(skill.name, val)"
+                          />
+                        </NSpace>
+                        <NTag
+                          :type="skill.eligible === false ? 'warning' : 'success'"
+                          size="small"
+                          :bordered="false"
+                          round
+                        >
+                          {{ skill.eligible === false ? '缺依赖/受限' : '可用' }}
+                        </NTag>
+                      </NSpace>
                     </NSpace>
                   </NSpace>
                 </NCard>
@@ -217,9 +245,22 @@ const pluginGroups = computed(() => [
           v-if="!skillStore.loading && visiblePlugins.length === 0"
           style="text-align: center; padding: 56px 0; color: var(--text-secondary);"
         >
-          没有匹配的用户插件
+          没有匹配的技能插件
         </div>
       </NSpin>
     </NCard>
   </NSpace>
 </template>
+
+<style scoped>
+.skill-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  min-height: calc(1.5em * 3);
+  word-break: break-word;
+}
+</style>

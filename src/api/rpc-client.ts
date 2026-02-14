@@ -33,6 +33,17 @@ import type {
   SessionsUsageParams,
   SessionsUsageResult,
   CostUsageSummary,
+  LogsTailParams,
+  LogsTailResult,
+  HealthSummary,
+  StatusSummary,
+  SystemPresenceEntry,
+  ExecApprovalsAgent,
+  ExecApprovalsDefaults,
+  ExecApprovalsFile,
+  ExecApprovalsSnapshot,
+  UpdateRunResponse,
+  UpdateRunResult,
 } from './types'
 
 let requestId = 0
@@ -1406,6 +1417,210 @@ export class RPCClient {
     }
   }
 
+  private normalizeStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) return undefined
+    const list = value
+      .map((item) => this.asString(item).trim())
+      .filter(Boolean)
+    return list.length > 0 ? list : undefined
+  }
+
+  private normalizePresenceEntry(value: unknown): SystemPresenceEntry {
+    const row = this.asRecord(value)
+    const tsNumber = this.asNumber(row.ts, Number.NaN)
+    const lastInputSeconds = this.asNumber(row.lastInputSeconds, Number.NaN)
+    return {
+      instanceId: this.asString(row.instanceId || row.id) || undefined,
+      host: this.asString(row.host) || undefined,
+      ip: this.asString(row.ip) || undefined,
+      version: this.asString(row.version) || undefined,
+      platform: this.asString(row.platform) || undefined,
+      deviceFamily: this.asString(row.deviceFamily) || undefined,
+      modelIdentifier: this.asString(row.modelIdentifier) || undefined,
+      mode: this.asString(row.mode) || undefined,
+      reason: this.asString(row.reason) || undefined,
+      text: this.asString(row.text) || undefined,
+      deviceId: this.asString(row.deviceId) || undefined,
+      roles: this.normalizeStringArray(row.roles) || undefined,
+      scopes: this.normalizeStringArray(row.scopes) || undefined,
+      tags: this.normalizeStringArray(row.tags) || undefined,
+      ts: Number.isFinite(tsNumber) && tsNumber >= 0 ? Math.floor(tsNumber) : undefined,
+      lastInputSeconds: Number.isFinite(lastInputSeconds) && lastInputSeconds >= 0
+        ? Math.floor(lastInputSeconds)
+        : undefined,
+    }
+  }
+
+  private normalizeLogsTailResult(payload: unknown): LogsTailResult {
+    const row = this.asRecord(payload)
+    const cursor = this.asNumber(row.cursor, 0)
+    const size = this.asNumber(row.size, 0)
+    const file = this.asString(row.file, '')
+    const lines = Array.isArray(row.lines)
+      ? row.lines
+          .map((line) => this.asString(line))
+          .filter((line) => typeof line === 'string')
+      : []
+    return {
+      file,
+      cursor: Number.isFinite(cursor) && cursor >= 0 ? Math.floor(cursor) : 0,
+      size: Number.isFinite(size) && size >= 0 ? Math.floor(size) : 0,
+      lines,
+      truncated: 'truncated' in row ? this.asBoolean(row.truncated, false) : undefined,
+      reset: 'reset' in row ? this.asBoolean(row.reset, false) : undefined,
+    }
+  }
+
+  private normalizeExecApprovalsFile(value: unknown): ExecApprovalsFile {
+    const normalizeSecurity = (input: unknown): ExecApprovalsDefaults['security'] | undefined => {
+      const value = this.asString(input).trim()
+      if (value === 'deny' || value === 'allowlist' || value === 'full') {
+        return value
+      }
+      return undefined
+    }
+
+    const normalizeAsk = (input: unknown): ExecApprovalsDefaults['ask'] | undefined => {
+      const value = this.asString(input).trim()
+      if (value === 'off' || value === 'on-miss' || value === 'always') {
+        return value
+      }
+      return undefined
+    }
+
+    const row = this.asRecord(value)
+    const defaultsRaw = this.asRecord(row.defaults)
+    const socketRaw = this.asRecord(row.socket)
+    const agentsRaw = this.asRecord(row.agents)
+    const agents: Record<string, ExecApprovalsAgent> = {}
+
+    for (const [agentId, agentRaw] of Object.entries(agentsRaw)) {
+      const agentRow = this.asRecord(agentRaw)
+      const allowlistRaw = Array.isArray(agentRow.allowlist) ? agentRow.allowlist : []
+      const allowlist = allowlistRaw
+        .map((entryRaw) => {
+          const entry = this.asRecord(entryRaw)
+          const pattern = this.asString(entry.pattern).trim()
+          if (!pattern) return null
+          const lastUsedAt = this.asNumber(entry.lastUsedAt, Number.NaN)
+          return {
+            id: this.asString(entry.id) || undefined,
+            pattern,
+            lastUsedAt: Number.isFinite(lastUsedAt) && lastUsedAt >= 0 ? Math.floor(lastUsedAt) : undefined,
+            lastUsedCommand: this.asString(entry.lastUsedCommand) || undefined,
+            lastResolvedPath: this.asString(entry.lastResolvedPath) || undefined,
+          }
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+
+      agents[agentId] = {
+        security: normalizeSecurity(agentRow.security),
+        ask: normalizeAsk(agentRow.ask),
+        askFallback: normalizeSecurity(agentRow.askFallback),
+        autoAllowSkills: 'autoAllowSkills' in agentRow
+          ? this.asBoolean(agentRow.autoAllowSkills, false)
+          : undefined,
+        allowlist: allowlist.length > 0 ? allowlist : undefined,
+      }
+    }
+
+    return {
+      version: 1,
+      socket: {
+        path: this.asString(socketRaw.path) || undefined,
+        token: this.asString(socketRaw.token) || undefined,
+      },
+      defaults: {
+        security: normalizeSecurity(defaultsRaw.security),
+        ask: normalizeAsk(defaultsRaw.ask),
+        askFallback: normalizeSecurity(defaultsRaw.askFallback),
+        autoAllowSkills: 'autoAllowSkills' in defaultsRaw
+          ? this.asBoolean(defaultsRaw.autoAllowSkills, false)
+          : undefined,
+      },
+      agents: Object.keys(agents).length > 0 ? agents : undefined,
+    }
+  }
+
+  private normalizeExecApprovalsSnapshot(payload: unknown): ExecApprovalsSnapshot {
+    const row = this.asRecord(payload)
+    return {
+      path: this.asString(row.path),
+      exists: this.asBoolean(row.exists, false),
+      hash: this.asString(row.hash),
+      file: this.normalizeExecApprovalsFile(row.file),
+    }
+  }
+
+  private normalizeUpdateRunResult(payload: unknown): UpdateRunResult {
+    const row = this.asRecord(payload)
+    const statusRaw = this.asString(row.status, 'error')
+    const modeRaw = this.asString(row.mode, 'unknown')
+    const durationMs = this.asNumber(row.durationMs, 0)
+    const steps = Array.isArray(row.steps)
+      ? row.steps.map((stepRaw) => {
+          const step = this.asRecord(stepRaw)
+          const stepDurationMs = this.asNumber(step.durationMs, Number.NaN)
+          const exitCode = this.asNumber(step.exitCode, Number.NaN)
+          return {
+            name: this.asString(step.name, 'step'),
+            command: this.asString(step.command, ''),
+            cwd: this.asString(step.cwd) || undefined,
+            durationMs: Number.isFinite(stepDurationMs) ? Math.floor(stepDurationMs) : undefined,
+            exitCode: Number.isFinite(exitCode) ? Math.floor(exitCode) : null,
+            stdoutTail: this.asString(step.stdoutTail) || null,
+            stderrTail: this.asString(step.stderrTail) || null,
+          }
+        })
+      : []
+
+    return {
+      status: statusRaw === 'ok' || statusRaw === 'skipped' ? statusRaw : 'error',
+      mode: modeRaw === 'git' || modeRaw === 'pnpm' || modeRaw === 'bun' || modeRaw === 'npm'
+        ? modeRaw
+        : 'unknown',
+      root: this.asString(row.root) || undefined,
+      reason: this.asString(row.reason) || undefined,
+      before: Object.keys(this.asRecord(row.before)).length > 0 ? {
+        sha: this.asString(this.asRecord(row.before).sha) || null,
+        version: this.asString(this.asRecord(row.before).version) || null,
+      } : null,
+      after: Object.keys(this.asRecord(row.after)).length > 0 ? {
+        sha: this.asString(this.asRecord(row.after).sha) || null,
+        version: this.asString(this.asRecord(row.after).version) || null,
+      } : null,
+      steps,
+      durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.floor(durationMs)) : 0,
+    }
+  }
+
+  private normalizeUpdateRunResponse(payload: unknown): UpdateRunResponse {
+    const row = this.asRecord(payload)
+    const restartRow = this.asRecord(row.restart)
+    const sentinelRow = this.asRecord(row.sentinel)
+    return {
+      ok: this.asBoolean(row.ok, true),
+      result: row.result ? this.normalizeUpdateRunResult(row.result) : undefined,
+      restart: Object.keys(restartRow).length > 0
+        ? {
+            ok: 'ok' in restartRow ? this.asBoolean(restartRow.ok, false) : undefined,
+            delayMs: 'delayMs' in restartRow ? this.asNumber(restartRow.delayMs, 0) : undefined,
+            pid: 'pid' in restartRow ? this.asNumber(restartRow.pid, 0) : undefined,
+            reason: this.asString(restartRow.reason) || undefined,
+            error: this.asString(restartRow.error) || undefined,
+          }
+        : null,
+      sentinel: Object.keys(sentinelRow).length > 0
+        ? {
+            path: this.asString(sentinelRow.path) || null,
+            payload: (sentinelRow.payload && typeof sentinelRow.payload === 'object')
+              ? (sentinelRow.payload as Record<string, unknown>)
+              : null,
+          }
+        : null,
+    }
+  }
+
   private looksLikeConfigRoot(value: unknown): value is OpenClawConfig {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false
     const row = value as Record<string, unknown>
@@ -1917,6 +2132,128 @@ export class RPCClient {
 
   approveNodePairing(nodeId: string, code: string): Promise<void> {
     return this.call('node.pair.approve', { nodeId, code })
+  }
+
+  // --- Ops ---
+  getHealth(params?: { probe?: boolean }): Promise<HealthSummary> {
+    const payload: Record<string, unknown> = {}
+    if (params?.probe === true) {
+      payload.probe = true
+    }
+
+    return this.callWithMethodAndParamsFallback<HealthSummary>(
+      ['health'],
+      [payload, {}, undefined],
+      params?.probe ? 60000 : 30000
+    )
+  }
+
+  getStatus(): Promise<StatusSummary> {
+    return this.callWithMethodAndParamsFallback<StatusSummary>(
+      ['status'],
+      [{}, undefined],
+      30000
+    )
+  }
+
+  getSystemPresence(): Promise<SystemPresenceEntry[]> {
+    return this.callWithMethodAndParamsFallback<unknown>(
+      ['system-presence'],
+      [{}, undefined]
+    ).then((payload) => {
+      const entries = Array.isArray(payload)
+        ? payload
+        : this.normalizeList<unknown>(payload, ['presence', 'items', 'list', 'data'])
+      return entries
+        .map((item) => this.normalizePresenceEntry(item))
+        .filter((item) => !!item.host || !!item.instanceId || !!item.deviceId)
+        .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    })
+  }
+
+  tailLogs(params?: LogsTailParams): Promise<LogsTailResult> {
+    const normalized: Record<string, unknown> = {}
+    if (typeof params?.cursor === 'number' && Number.isFinite(params.cursor) && params.cursor >= 0) {
+      normalized.cursor = Math.floor(params.cursor)
+    }
+    if (typeof params?.limit === 'number' && Number.isFinite(params.limit) && params.limit > 0) {
+      normalized.limit = Math.floor(params.limit)
+    }
+    if (typeof params?.maxBytes === 'number' && Number.isFinite(params.maxBytes) && params.maxBytes > 0) {
+      normalized.maxBytes = Math.floor(params.maxBytes)
+    }
+
+    return this.callWithMethodAndParamsFallback<unknown>(
+      ['logs.tail'],
+      [normalized, {}]
+    ).then((payload) => this.normalizeLogsTailResult(payload))
+  }
+
+  getExecApprovals(target?: { nodeId?: string }): Promise<ExecApprovalsSnapshot> {
+    const nodeId = target?.nodeId?.trim()
+    if (nodeId) {
+      return this.callWithFallback<unknown>(['exec.approvals.node.get'], { nodeId })
+        .then((payload) => this.normalizeExecApprovalsSnapshot(payload))
+    }
+    return this.callWithFallback<unknown>(['exec.approvals.get'], {})
+      .then((payload) => this.normalizeExecApprovalsSnapshot(payload))
+  }
+
+  setExecApprovals(params: {
+    file: ExecApprovalsFile
+    baseHash: string
+    nodeId?: string
+  }): Promise<ExecApprovalsSnapshot> {
+    const nodeId = params.nodeId?.trim()
+    const payload = {
+      file: this.normalizeExecApprovalsFile(params.file),
+      baseHash: params.baseHash,
+    }
+
+    if (nodeId) {
+      return this.callWithFallback<unknown>(
+        ['exec.approvals.node.set'],
+        { nodeId, ...payload }
+      ).then((res) => this.normalizeExecApprovalsSnapshot(res))
+    }
+
+    return this.callWithFallback<unknown>(
+      ['exec.approvals.set'],
+      payload
+    ).then((res) => this.normalizeExecApprovalsSnapshot(res))
+  }
+
+  runUpdate(params?: {
+    sessionKey?: string
+    note?: string
+    restartDelayMs?: number
+    timeoutMs?: number
+  }): Promise<UpdateRunResponse> {
+    const payload: Record<string, unknown> = {}
+    if (params?.sessionKey?.trim()) payload.sessionKey = params.sessionKey.trim()
+    if (params?.note?.trim()) payload.note = params.note.trim()
+    if (
+      typeof params?.restartDelayMs === 'number' &&
+      Number.isFinite(params.restartDelayMs) &&
+      params.restartDelayMs >= 0
+    ) {
+      payload.restartDelayMs = Math.floor(params.restartDelayMs)
+    }
+    if (
+      typeof params?.timeoutMs === 'number' &&
+      Number.isFinite(params.timeoutMs) &&
+      params.timeoutMs >= 1000
+    ) {
+      payload.timeoutMs = Math.floor(params.timeoutMs)
+    }
+
+    return this.callWithMethodAndParamsFallback<unknown>(
+      ['update.run'],
+      [payload, {}],
+      (params?.timeoutMs && Number.isFinite(params.timeoutMs))
+        ? Math.max(5000, Math.floor(params.timeoutMs) + 15000)
+        : 240000
+    ).then((res) => this.normalizeUpdateRunResponse(res))
   }
 
   // --- Agents ---

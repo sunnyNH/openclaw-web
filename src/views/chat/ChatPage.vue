@@ -488,10 +488,6 @@ const slashModelMode = computed(() =>
   slashMode.value && (slashCommandKeyword.value === 'model' || slashCommandKeyword.value === 'models')
 )
 
-function isUserSkill(skill: Skill): boolean {
-  return skill.source === 'workspace' || skill.source === 'managed' || skill.source === 'extra'
-}
-
 function skillSourceLabel(source: Skill['source']): string {
   if (source === 'workspace') return '用户创建'
   if (source === 'managed') return '用户安装'
@@ -499,10 +495,14 @@ function skillSourceLabel(source: Skill['source']): string {
   return '内置'
 }
 
-const userSkills = computed(() =>
+const availableSkills = computed(() =>
   skillStore.skills
-    .filter((skill) => isUserSkill(skill))
-    .filter((skill) => !skill.disabled)
+    .filter((skill) => {
+      if (skill.disabled) return false
+      if (skill.eligible === false) return false
+      if (!skillStore.isSkillVisibleInChat(skill.name)) return false
+      return true
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
 )
 
@@ -516,8 +516,8 @@ const slashSkillNameQuery = computed(() => {
 const slashSkillOptions = computed<Skill[]>(() => {
   if (!slashSkillMode.value) return []
   const query = slashSkillNameQuery.value
-  if (!query) return userSkills.value
-  return userSkills.value.filter((skill) =>
+  if (!query) return availableSkills.value
+  return availableSkills.value.filter((skill) =>
     [skill.name, skill.description || ''].some((field) => field.toLowerCase().includes(query))
   )
 })
@@ -2098,7 +2098,7 @@ async function handleSend() {
                   </div>
                   <div v-else class="chat-slash-empty">
                     <template v-if="slashSkillMode">
-                      {{ skillStore.loading ? '正在加载技能列表...' : '没有匹配技能，或当前没有用户技能。' }}
+                      {{ skillStore.loading ? '正在加载技能列表...' : '没有匹配技能（可在技能管理开启“Chat 显示内置”，或在技能卡片上打开 Chat 开关）。' }}
                     </template>
                     <template v-else-if="slashModelMode">
                       {{ configStore.loading ? '正在读取配置模型...' : '没有匹配模型，或当前未配置模型。' }}
