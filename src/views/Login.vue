@@ -2,15 +2,14 @@
 import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { NCard, NInput, NButton, NSpace, NText, NAlert } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { useTheme } from '@/composables/useTheme'
-import { NConfigProvider, NMessageProvider } from 'naive-ui'
 import { buildConnectParams } from '@/api/connect'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const { theme } = useTheme()
+const { t } = useI18n()
 
 const token = ref(authStore.token)
 const gatewayUrl = ref(authStore.gatewayUrl)
@@ -27,7 +26,7 @@ const gatewaySchemeHint = computed(() => {
   if (!url) return ''
   if (!isHttpsPage.value) return ''
   if (!url.toLowerCase().startsWith('ws://')) return ''
-  return '当前页面为 HTTPS，浏览器会拦截 ws:// WebSocket。请改用 wss:// 地址，或使用 SSH 隧道后连接 ws://127.0.0.1:18789。'
+  return t('common.httpsWsBlocked')
 })
 
 function buildGatewayUrl(url: string, tokenValue: string): string {
@@ -46,7 +45,7 @@ function buildGatewayUrl(url: string, tokenValue: string): string {
 
 async function handleLogin() {
   if (!token.value.trim()) {
-    error.value = '请输入 Gateway Token'
+    error.value = t('pages.login.inputTokenRequired')
     return
   }
 
@@ -69,7 +68,7 @@ async function handleLogin() {
         if (settled) return
         settled = true
         ws.close()
-        reject(new Error('连接超时，请检查 Gateway 地址'))
+        reject(new Error(t('pages.login.connectTimeout')))
       }, 8000)
 
       ws.onopen = () => {
@@ -99,7 +98,7 @@ async function handleLogin() {
             resolve()
           } else {
             ws.close()
-            reject(new Error(res.error?.message || 'Token 验证失败'))
+            reject(new Error(res.error?.message || t('pages.login.tokenInvalid')))
           }
         } catch {
           // 只忽略非 JSON 消息，继续等待 connect 响应
@@ -111,9 +110,9 @@ async function handleLogin() {
         settled = true
         clearTimeout(timer)
         if (event.code !== 1000) {
-          reject(new Error(event.reason || `连接已关闭 (code ${event.code})`))
+          reject(new Error(event.reason || t('pages.login.connectionClosedWithCode', { code: event.code })))
         } else {
-          reject(new Error('连接已关闭'))
+          reject(new Error(t('pages.login.connectionClosed')))
         }
       }
 
@@ -121,7 +120,7 @@ async function handleLogin() {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        reject(new Error('连接失败，请检查 Gateway 地址'))
+        reject(new Error(t('pages.login.connectFailed')))
       }
     })
 
@@ -139,74 +138,72 @@ async function handleLogin() {
 </script>
 
 <template>
-  <NConfigProvider :theme="theme">
-    <NMessageProvider>
-      <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg-secondary); padding: 20px;">
-        <NCard
-          style="max-width: 420px; width: 100%; border-radius: var(--radius-lg);"
-          :bordered="true"
-        >
-          <div style="text-align: center; margin-bottom: 32px;">
-            <span style="font-size: 48px; display: block; margin-bottom: 12px;">🦞</span>
-            <NText strong style="font-size: 24px; letter-spacing: -0.5px;">
-              OpenClaw Admin
-            </NText>
-            <div style="margin-top: 8px;">
-              <NText depth="3" style="font-size: 14px;">
-                连接到 OpenClaw Gateway 管理你的 AI 助手
-              </NText>
-            </div>
-          </div>
-
-          <NSpace vertical :size="16">
-            <div>
-              <NText depth="3" style="font-size: 13px; margin-bottom: 6px; display: block;">
-                Gateway 地址
-              </NText>
-              <NInput
-                v-model:value="gatewayUrl"
-                placeholder="ws://127.0.0.1:18789"
-                :disabled="loading"
-              />
-              <NAlert v-if="gatewaySchemeHint" type="warning" :bordered="false" style="margin-top: 10px;">
-                {{ gatewaySchemeHint }}
-              </NAlert>
-            </div>
-
-            <div>
-              <NText depth="3" style="font-size: 13px; margin-bottom: 6px; display: block;">
-                Gateway Token
-              </NText>
-              <NInput
-                v-model:value="token"
-                type="password"
-                show-password-on="click"
-                placeholder="输入你的 Gateway Token"
-                :disabled="loading"
-                @keydown.enter="handleLogin"
-              />
-              <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block;">
-                运行 <code style="background: var(--bg-secondary); padding: 1px 4px; border-radius: 3px;">openclaw config get gateway.auth.token</code> 获取 Token
-              </NText>
-            </div>
-
-            <NAlert v-if="error" type="error" :bordered="false">
-              {{ error }}
-            </NAlert>
-
-            <NButton
-              type="primary"
-              block
-              :loading="loading"
-              size="large"
-              style="border-radius: 8px;"
-              @click="handleLogin"
-            >
-              连接
-            </NButton>
-          </NSpace>
-        </NCard>
+  <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg-secondary); padding: 20px;">
+    <NCard
+      style="max-width: 420px; width: 100%; border-radius: var(--radius-lg);"
+      :bordered="true"
+    >
+      <div style="text-align: center; margin-bottom: 32px;">
+        <span style="font-size: 48px; display: block; margin-bottom: 12px;">🦞</span>
+        <NText strong style="font-size: 24px; letter-spacing: -0.5px;">
+          OpenClaw Admin
+        </NText>
+        <div style="margin-top: 8px;">
+          <NText depth="3" style="font-size: 14px;">
+            {{ t('pages.login.subtitle') }}
+          </NText>
+        </div>
       </div>
-    </NMessageProvider>
-  </NConfigProvider>
+
+      <NSpace vertical :size="16">
+        <div>
+          <NText depth="3" style="font-size: 13px; margin-bottom: 6px; display: block;">
+            {{ t('pages.login.gatewayUrlLabel') }}
+          </NText>
+          <NInput
+            v-model:value="gatewayUrl"
+            :placeholder="t('pages.login.gatewayUrlPlaceholder')"
+            :disabled="loading"
+          />
+          <NAlert v-if="gatewaySchemeHint" type="warning" :bordered="false" style="margin-top: 10px;">
+            {{ gatewaySchemeHint }}
+          </NAlert>
+        </div>
+
+        <div>
+          <NText depth="3" style="font-size: 13px; margin-bottom: 6px; display: block;">
+            {{ t('pages.login.tokenLabel') }}
+          </NText>
+          <NInput
+            v-model:value="token"
+            type="password"
+            show-password-on="click"
+            :placeholder="t('pages.login.tokenPlaceholder')"
+            :disabled="loading"
+            @keydown.enter="handleLogin"
+          />
+          <NText depth="3" style="font-size: 12px; margin-top: 4px; display: block;">
+            {{ t('pages.login.tokenHintPrefix') }}
+            <code style="background: var(--bg-secondary); padding: 1px 4px; border-radius: 3px;">openclaw config get gateway.auth.token</code>
+            {{ t('pages.login.tokenHintSuffix') }}
+          </NText>
+        </div>
+
+        <NAlert v-if="error" type="error" :bordered="false">
+          {{ error }}
+        </NAlert>
+
+        <NButton
+          type="primary"
+          block
+          :loading="loading"
+          size="large"
+          style="border-radius: 8px;"
+          @click="handleLogin"
+        >
+          {{ t('pages.login.connect') }}
+        </NButton>
+      </NSpace>
+    </NCard>
+  </div>
 </template>

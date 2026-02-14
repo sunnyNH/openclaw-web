@@ -20,6 +20,7 @@ import {
   removeAccountConfig,
 } from '@/utils/channel-config'
 import { normalizeSecretInput } from '@/utils/secret-mask'
+import { byLocale, getActiveLocale } from '@/i18n/text'
 
 type SecretScope = {
   channelKey: string
@@ -200,7 +201,11 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
   function normalizePluginRpcErrorMessage(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error)
     if (/unknown method/i.test(message) || /method not found/i.test(message)) {
-      return 'Gateway 当前版本未提供插件列表 RPC（plugins.list）'
+      return byLocale(
+        'Gateway 当前版本未提供插件列表 RPC（plugins.list）',
+        'This Gateway does not support plugins.list RPC',
+        getActiveLocale(),
+      )
     }
     return message
   }
@@ -362,7 +367,7 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
 
   async function installChannelPlugin(pluginNames: string[]): Promise<string> {
     if (pluginNames.length === 0) {
-      throw new Error('未提供可安装插件')
+      throw new Error(byLocale('未提供可安装插件', 'No installable plugin provided', getActiveLocale()))
     }
 
     let lastInstallError: unknown
@@ -378,7 +383,7 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
 
     throw lastInstallError instanceof Error
       ? lastInstallError
-      : new Error('远程安装失败')
+      : new Error(byLocale('远程安装失败', 'Remote install failed', getActiveLocale()))
   }
 
   function buildPersistedChannelsDraft(): Record<string, ChannelConfig> {
@@ -425,7 +430,7 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
     try {
       const connected = await waitForGatewayReconnect()
       if (!connected) {
-        throw new Error('配置应用后重连超时，请检查 Gateway 状态')
+        throw new Error(byLocale('配置应用后重连超时，请检查 Gateway 状态', 'Reconnect timed out after apply. Please check Gateway status.', getActiveLocale()))
       }
       await refreshRuntimeChannels()
     } finally {

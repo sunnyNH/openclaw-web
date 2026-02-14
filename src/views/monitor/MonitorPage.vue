@@ -31,6 +31,7 @@ import {
   SaveOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
 import { formatDate, formatRelativeTime } from '@/utils/format'
 import type {
@@ -74,6 +75,7 @@ const LOG_BUFFER_LIMIT = 2000
 const message = useMessage()
 const dialog = useDialog()
 const wsStore = useWebSocketStore()
+const { t } = useI18n()
 
 const activeTab = ref<OpsTab>('presence')
 
@@ -139,11 +141,11 @@ const connectionTagType = computed<'success' | 'warning' | 'error' | 'default'>(
 })
 
 const connectionLabel = computed(() => {
-  if (wsStore.state === 'connected') return '网关已连接'
-  if (wsStore.state === 'connecting') return '网关连接中'
-  if (wsStore.state === 'reconnecting') return '网关重连中'
-  if (wsStore.state === 'failed') return '网关连接失败'
-  return '网关未连接'
+  if (wsStore.state === 'connected') return t('pages.monitor.connection.connected')
+  if (wsStore.state === 'connecting') return t('pages.monitor.connection.connecting')
+  if (wsStore.state === 'reconnecting') return t('pages.monitor.connection.reconnecting')
+  if (wsStore.state === 'failed') return t('pages.monitor.connection.failed')
+  return t('pages.monitor.connection.disconnected')
 })
 
 const onlinePresenceCount = computed(() => {
@@ -272,7 +274,7 @@ const updateStatusTagType = computed<'success' | 'error' | 'warning' | 'default'
 })
 
 function methodNotReadyLabel(methodLabel: string): string {
-  return `当前 Gateway 不支持 ${methodLabel}`
+  return t('pages.monitor.methodNotSupported', { method: methodLabel })
 }
 
 function asErrorMessage(error: unknown, fallback: string): string {
@@ -425,7 +427,7 @@ async function loadHealthStatus(opts?: { probe?: boolean }) {
         diagLastProbeAt.value = Date.now()
       }
     } catch (error) {
-      healthError.value = asErrorMessage(error, '获取 health 失败')
+      healthError.value = asErrorMessage(error, t('pages.monitor.errors.healthFailed'))
     }
   }
 
@@ -436,7 +438,7 @@ async function loadHealthStatus(opts?: { probe?: boolean }) {
       statusSnapshot.value = await wsStore.rpc.getStatus()
       updated = true
     } catch (error) {
-      statusError.value = asErrorMessage(error, '获取 status 失败')
+      statusError.value = asErrorMessage(error, t('pages.monitor.errors.statusFailed'))
     }
   }
 
@@ -459,7 +461,7 @@ async function loadPresence(quiet = false) {
     presenceEntries.value = await wsStore.rpc.getSystemPresence()
     presenceLastUpdatedAt.value = Date.now()
   } catch (error) {
-    presenceError.value = asErrorMessage(error, '获取实例状态失败')
+    presenceError.value = asErrorMessage(error, t('pages.monitor.errors.presenceFailed'))
   } finally {
     if (!quiet) presenceLoading.value = false
   }
@@ -495,7 +497,7 @@ async function loadLogs(opts?: { reset?: boolean; quiet?: boolean }) {
       scrollLogsToBottom()
     }
   } catch (error) {
-    logsError.value = asErrorMessage(error, '获取日志失败')
+    logsError.value = asErrorMessage(error, t('pages.monitor.errors.logsFailed'))
   } finally {
     if (!opts?.quiet) logsLoading.value = false
   }
@@ -543,7 +545,7 @@ async function loadApprovals() {
   if (approvalsLoading.value) return
 
   if (approvalsTargetKind.value === 'node' && !approvalsTargetNodeId.value.trim()) {
-    approvalsError.value = '请选择一个节点后再加载审批策略'
+    approvalsError.value = t('pages.monitor.approvals.errors.selectNodeBeforeLoad')
     return
   }
 
@@ -555,7 +557,7 @@ async function loadApprovals() {
     })
     applyApprovalsSnapshot(snapshot)
   } catch (error) {
-    approvalsError.value = asErrorMessage(error, '加载审批策略失败')
+    approvalsError.value = asErrorMessage(error, t('pages.monitor.approvals.errors.loadFailed'))
   } finally {
     approvalsLoading.value = false
   }
@@ -563,11 +565,11 @@ async function loadApprovals() {
 
 async function saveApprovals() {
   if (!approvalsSnapshot.value?.hash) {
-    approvalsError.value = '缺少 baseHash，请先重新加载审批策略'
+    approvalsError.value = t('pages.monitor.approvals.errors.missingBaseHash')
     return
   }
   if (approvalsTargetKind.value === 'node' && !approvalsTargetNodeId.value.trim()) {
-    approvalsError.value = '请选择一个节点后再保存审批策略'
+    approvalsError.value = t('pages.monitor.approvals.errors.selectNodeBeforeSave')
     return
   }
 
@@ -581,9 +583,9 @@ async function saveApprovals() {
       nodeId: approvalsTargetKind.value === 'node' ? approvalsTargetNodeId.value : undefined,
     })
     applyApprovalsSnapshot(snapshot)
-    message.success('审批策略已保存')
+    message.success(t('pages.monitor.approvals.saved'))
   } catch (error) {
-    approvalsError.value = asErrorMessage(error, '保存审批策略失败')
+    approvalsError.value = asErrorMessage(error, t('pages.monitor.approvals.errors.saveFailed'))
   } finally {
     approvalsSaving.value = false
   }
@@ -612,13 +614,13 @@ function updateCurrentAgent(patch: Partial<ExecApprovalsAgent>) {
 function addAgent() {
   const id = newAgentId.value.trim()
   if (!id) {
-    message.warning('请输入 Agent ID')
+    message.warning(t('pages.monitor.approvals.errors.agentIdRequired'))
     return
   }
   const form = ensureApprovalsForm()
   if (!form.agents) form.agents = {}
   if (form.agents[id]) {
-    message.warning(`Agent ${id} 已存在`)
+    message.warning(t('pages.monitor.approvals.errors.agentExists', { id }))
     return
   }
 
@@ -638,7 +640,7 @@ function removeCurrentAgent() {
   const form = ensureApprovalsForm()
   const target = approvalsAgentId.value.trim()
   if (!target || target === 'main') {
-    message.warning('main Agent 不支持删除')
+    message.warning(t('pages.monitor.approvals.errors.cannotDeleteMain'))
     return
   }
   if (!form.agents || !form.agents[target]) return
@@ -651,7 +653,7 @@ function removeCurrentAgent() {
 function addAllowPattern() {
   const pattern = newAllowPattern.value.trim()
   if (!pattern) {
-    message.warning('请输入 allowlist pattern')
+    message.warning(t('pages.monitor.approvals.errors.allowlistPatternRequired'))
     return
   }
   const allowlist = [...currentAllowlist.value]
@@ -705,14 +707,14 @@ async function runUpdate() {
     updateLastTriggeredAt.value = Date.now()
 
     if (response.result?.status === 'ok') {
-      message.success('更新任务已执行，网关将按计划重启')
+      message.success(t('pages.monitor.update.messages.ok'))
     } else if (response.result?.status === 'skipped') {
-      message.warning('更新任务已执行，但被跳过')
+      message.warning(t('pages.monitor.update.messages.skipped'))
     } else {
-      message.error(`更新任务失败：${response.result?.reason || '未知原因'}`)
+      message.error(t('pages.monitor.update.messages.failed', { reason: response.result?.reason || t('pages.monitor.update.messages.unknownReason') }))
     }
   } catch (error) {
-    updateError.value = asErrorMessage(error, '执行更新失败')
+    updateError.value = asErrorMessage(error, t('pages.monitor.update.errors.runFailed'))
   } finally {
     updateRunning.value = false
   }
@@ -720,15 +722,15 @@ async function runUpdate() {
 
 function confirmRunUpdate() {
   dialog.warning({
-    title: '⚠️ 危险操作检测！',
+    title: t('pages.monitor.update.confirm.title'),
     content: () => h('div', { style: 'line-height: 1.75;' }, [
-      h('div', '操作类型：运行 update.run（更新并重启网关）'),
-      h('div', '影响范围：当前 OpenClaw Gateway 进程会触发重启，Web 管理连接会短暂中断'),
-      h('div', '风险评估：更新失败可能导致版本不变或出现启动异常，需要结合日志排查'),
-      h('div', { style: 'margin-top: 8px; font-weight: 600;' }, '请确认是否继续？'),
+      h('div', t('pages.monitor.update.confirm.lines.action')),
+      h('div', t('pages.monitor.update.confirm.lines.scope')),
+      h('div', t('pages.monitor.update.confirm.lines.risk')),
+      h('div', { style: 'margin-top: 8px; font-weight: 600;' }, t('pages.monitor.update.confirm.lines.confirm')),
     ]),
-    positiveText: '确认继续',
-    negativeText: '取消',
+    positiveText: t('pages.monitor.update.confirm.positive'),
+    negativeText: t('common.cancel'),
     onPositiveClick: () => runUpdate(),
   })
 }
@@ -807,39 +809,42 @@ onUnmounted(() => {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="运维中心" class="app-card ops-top-card">
+    <NCard :title="t('routes.monitor')" class="app-card ops-top-card">
       <template #header-extra>
         <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="refreshOpsData">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          全量刷新
+          {{ t('pages.monitor.actions.refreshAll') }}
         </NButton>
       </template>
 
       <NSpace :size="12" align="center" style="flex-wrap: wrap;">
         <NTag :type="connectionTagType" :bordered="false" round>{{ connectionLabel }}</NTag>
         <NTag type="success" :bordered="false" round>
-          实例 {{ onlinePresenceCount }}/{{ presenceEntries.length }}
+          {{ t('pages.monitor.summary.presence', { online: onlinePresenceCount, total: presenceEntries.length }) }}
         </NTag>
         <NTag type="info" :bordered="false" round>
-          日志 {{ logsFilteredEntries.length }} 条
+          {{ t('pages.monitor.summary.logs', { count: logsFilteredEntries.length }) }}
         </NTag>
         <NText depth="3" style="font-size: 12px;">
-          最近同步：
-          {{ logsLastUpdatedAt ? formatRelativeTime(logsLastUpdatedAt) : '尚未同步' }}
+          {{
+            t('pages.monitor.summary.lastSync', {
+              time: logsLastUpdatedAt ? formatRelativeTime(logsLastUpdatedAt) : t('pages.monitor.summary.neverSynced'),
+            })
+          }}
         </NText>
       </NSpace>
       <NText depth="3" class="ops-top-subtitle">
-        统一查看实例在线、日志尾流、审批策略与更新执行结果。
+        {{ t('pages.monitor.subtitle') }}
       </NText>
     </NCard>
 
     <NTabs v-model:value="activeTab" type="line" animated>
-      <NTabPane name="presence" tab="实例状态（system-presence）">
-        <NCard title="实例状态" class="app-card">
+      <NTabPane name="presence" :tab="t('pages.monitor.tabs.presence')">
+        <NCard :title="t('pages.monitor.presence.title')" class="app-card">
           <template #header-extra>
             <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="loadPresence()">
               <template #icon><NIcon :component="RefreshOutline" /></template>
-              刷新实例
+              {{ t('pages.monitor.presence.refresh') }}
             </NButton>
           </template>
 
@@ -849,7 +854,7 @@ onUnmounted(() => {
             :bordered="false"
             style="margin-bottom: 12px;"
           >
-            当前 Gateway 不支持 <code>system-presence</code>，请升级后重试。
+            {{ t('pages.monitor.presence.notSupported') }}
           </NAlert>
           <NAlert
             v-else-if="presenceError"
@@ -860,15 +865,15 @@ onUnmounted(() => {
             {{ presenceError }}
           </NAlert>
           <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 10px;">
-            来源于 <code>system-presence</code>，用于观察网关与客户端在线情况。
+            {{ t('pages.monitor.presence.hint') }}
           </NText>
 
-          <NCard size="small" embedded class="ops-inner-card" title="健康 / 状态诊断（health + status）">
+          <NCard size="small" embedded class="ops-inner-card" :title="t('pages.monitor.diag.title')">
             <template #header-extra>
               <NSpace :size="8" align="center">
                 <NButton size="small" :loading="diagLoading" @click="loadHealthStatus()">
                   <template #icon><NIcon :component="RefreshOutline" /></template>
-                  刷新
+                  {{ t('common.refresh') }}
                 </NButton>
                 <NButton size="small" type="warning" :loading="diagLoading" @click="loadHealthStatus({ probe: true })">
                   <template #icon><NIcon :component="SearchOutline" /></template>
@@ -883,7 +888,7 @@ onUnmounted(() => {
               :bordered="false"
               style="margin-bottom: 12px;"
             >
-              当前 Gateway 可能不支持 <code>health</code> / <code>status</code>（或方法列表未上报）。
+              {{ t('pages.monitor.diag.notSupported') }}
             </NAlert>
             <NAlert
               v-if="healthError"
@@ -891,7 +896,7 @@ onUnmounted(() => {
               :bordered="false"
               style="margin-bottom: 12px;"
             >
-              health：{{ healthError }}
+              {{ t('pages.monitor.diag.healthError', { error: healthError }) }}
             </NAlert>
             <NAlert
               v-if="statusError"
@@ -899,11 +904,11 @@ onUnmounted(() => {
               :bordered="false"
               style="margin-bottom: 12px;"
             >
-              status：{{ statusError }}
+              {{ t('pages.monitor.diag.statusError', { error: statusError }) }}
             </NAlert>
 
             <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 10px;">
-              来源于 <code>health</code> / <code>status</code>。health 默认缓存约 60s；Probe 会触发更深探测，耗时可能更久。
+              {{ t('pages.monitor.diag.hint') }}
             </NText>
 
             <NSpin :show="diagLoading">
@@ -931,11 +936,8 @@ onUnmounted(() => {
                 </NGridItem>
                 <NGridItem>
                   <div class="ops-meta-item">
-                    <div class="muted">Probe 结果</div>
-                    <div>
-                      {{ healthProbedAccountCount }}
-                      <span class="muted">个账号有探测数据</span>
-                    </div>
+                    <div class="muted">{{ t('pages.monitor.diag.probeResult') }}</div>
+                    <div>{{ t('pages.monitor.diag.probeAccounts', { count: healthProbedAccountCount }) }}</div>
                   </div>
                 </NGridItem>
                 <NGridItem>
@@ -944,7 +946,7 @@ onUnmounted(() => {
                     <div>
                       {{ healthSnapshot?.sessions?.count ?? '-' }}
                       <span v-if="healthSnapshot?.defaultAgentId" class="muted">
-                        · 默认 {{ healthSnapshot.defaultAgentId }}
+                        {{ t('pages.monitor.diag.defaultAgent', { id: healthSnapshot.defaultAgentId }) }}
                       </span>
                     </div>
                   </div>
@@ -954,7 +956,7 @@ onUnmounted(() => {
                     <div class="muted">Heartbeat</div>
                     <div>
                       {{ statusHeartbeatEnabledCount }}/{{ statusSnapshot?.heartbeat?.agents?.length ?? 0 }}
-                      <span class="muted">已启用</span>
+                      <span class="muted">{{ t('pages.monitor.diag.enabled') }}</span>
                     </div>
                   </div>
                 </NGridItem>
@@ -967,12 +969,12 @@ onUnmounted(() => {
               </NGrid>
 
               <NText v-if="healthSnapshot?.ts" depth="3" style="font-size: 12px; display: block; margin-top: 8px;">
-                health 更新时间：{{ formatRelativeTime(healthSnapshot.ts) }}
-                <span v-if="diagLastProbeAt"> · 最近 Probe：{{ formatRelativeTime(diagLastProbeAt) }}</span>
+                {{ t('pages.monitor.diag.healthUpdatedAt', { time: formatRelativeTime(healthSnapshot.ts) }) }}
+                <span v-if="diagLastProbeAt">{{ t('pages.monitor.diag.lastProbeAt', { time: formatRelativeTime(diagLastProbeAt) }) }}</span>
               </NText>
               <NText v-else-if="diagLastUpdatedAt" depth="3" style="font-size: 12px; display: block; margin-top: 8px;">
-                诊断更新时间：{{ formatRelativeTime(diagLastUpdatedAt) }}
-                <span v-if="diagLastProbeAt"> · 最近 Probe：{{ formatRelativeTime(diagLastProbeAt) }}</span>
+                {{ t('pages.monitor.diag.diagUpdatedAt', { time: formatRelativeTime(diagLastUpdatedAt) }) }}
+                <span v-if="diagLastProbeAt">{{ t('pages.monitor.diag.lastProbeAt', { time: formatRelativeTime(diagLastProbeAt) }) }}</span>
               </NText>
             </NSpin>
           </NCard>
@@ -989,7 +991,7 @@ onUnmounted(() => {
                     {{ entry.host || entry.instanceId || entry.deviceId || 'unknown-host' }}
                   </div>
                   <div class="presence-sub">
-                    {{ entry.text || entry.reason || '无额外描述' }}
+                    {{ entry.text || entry.reason || t('common.noDescription') }}
                   </div>
                   <NSpace :size="6" style="margin-top: 8px; flex-wrap: wrap;">
                     <NTag v-if="entry.mode" size="small" :bordered="false" round>{{ entry.mode }}</NTag>
@@ -1017,25 +1019,25 @@ onUnmounted(() => {
 
               <NEmpty
                 v-if="!presenceLoading && presenceEntries.length === 0"
-                description="暂无实例上报"
+                :description="t('pages.monitor.presence.empty')"
                 style="padding: 48px 0;"
               />
             </div>
           </NSpin>
 
           <NText v-if="presenceLastUpdatedAt" depth="3" style="font-size: 12px;">
-            更新于 {{ formatDate(presenceLastUpdatedAt) }}
+            {{ t('pages.monitor.presence.updatedAt', { time: formatDate(presenceLastUpdatedAt) }) }}
           </NText>
         </NCard>
       </NTabPane>
 
-      <NTabPane name="logs" tab="实时日志（logs.tail）">
-        <NCard title="实时日志" class="app-card">
+      <NTabPane name="logs" :tab="t('pages.monitor.tabs.logs')">
+        <NCard :title="t('pages.monitor.logs.title')" class="app-card">
           <template #header-extra>
             <NSpace :size="8" align="center" class="app-toolbar">
               <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="loadLogs({ reset: true })">
                 <template #icon><NIcon :component="RefreshOutline" /></template>
-                刷新
+                {{ t('common.refresh') }}
               </NButton>
               <NButton
                 size="small"
@@ -1044,11 +1046,11 @@ onUnmounted(() => {
                 @click="exportFilteredLogs"
               >
                 <template #icon><NIcon :component="DownloadOutline" /></template>
-                导出
+                {{ t('common.export') }}
               </NButton>
               <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="clearLogs">
                 <template #icon><NIcon :component="TrashOutline" /></template>
-                清空
+                {{ t('common.clear') }}
               </NButton>
             </NSpace>
           </template>
@@ -1059,7 +1061,7 @@ onUnmounted(() => {
             :bordered="false"
             style="margin-bottom: 12px;"
           >
-            当前 Gateway 不支持 <code>logs.tail</code>，请升级后重试。
+            {{ t('pages.monitor.logs.notSupportedPrefix') }}<code>logs.tail</code>{{ t('pages.monitor.logs.notSupportedSuffix') }}
           </NAlert>
           <NAlert
             v-else-if="logsError"
@@ -1075,20 +1077,20 @@ onUnmounted(() => {
             :bordered="false"
             style="margin-bottom: 12px;"
           >
-            日志返回被截断，仅显示最近一段（可调大 maxBytes）。
+            {{ t('pages.monitor.logs.truncatedHint') }}
           </NAlert>
           <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 10px;">
-            来源于 <code>logs.tail</code>，支持增量游标与级别过滤。
+            {{ t('pages.monitor.logs.hintPrefix') }}<code>logs.tail</code>{{ t('pages.monitor.logs.hintSuffix') }}
           </NText>
 
           <NGrid cols="1 s:2 m:4" responsive="screen" :x-gap="12" :y-gap="10" style="margin-bottom: 12px;">
             <NGridItem>
-              <NFormItem label="关键词">
-                <NInput v-model:value="logsKeyword" placeholder="搜索 message/subsystem/raw" clearable />
+              <NFormItem :label="t('pages.monitor.logs.keyword')">
+                <NInput v-model:value="logsKeyword" :placeholder="t('pages.monitor.logs.keywordPlaceholder')" clearable />
               </NFormItem>
             </NGridItem>
             <NGridItem>
-              <NFormItem label="日志级别">
+              <NFormItem :label="t('pages.monitor.logs.level')">
                 <NSelect
                   v-model:value="logsLevelFilter"
                   :options="logLevelOptions"
@@ -1111,17 +1113,17 @@ onUnmounted(() => {
           </NGrid>
 
           <NSpace align="center" :size="8" style="margin-bottom: 12px;">
-            <NText depth="3" style="font-size: 12px;">自动跟随</NText>
+            <NText depth="3" style="font-size: 12px;">{{ t('pages.monitor.logs.autoFollow') }}</NText>
             <NSwitch v-model:value="logsAutoFollow" size="small" />
             <NText depth="3" style="font-size: 12px;">
-              文件：{{ logsFile || '-' }}
+              {{ t('pages.monitor.logs.file', { file: logsFile || '-' }) }}
             </NText>
           </NSpace>
 
           <NSpin :show="logsLoading">
             <NScrollbar ref="logScrollbarRef" class="logs-scroll">
               <div v-if="logsFilteredEntries.length === 0" class="logs-empty">
-                <NEmpty description="暂无日志" />
+                <NEmpty :description="t('pages.monitor.logs.empty')" />
               </div>
               <div v-else>
                 <div
@@ -1142,13 +1144,13 @@ onUnmounted(() => {
         </NCard>
       </NTabPane>
 
-      <NTabPane name="approvals" tab="审批策略（exec.approvals.*）">
-        <NCard title="审批策略" class="app-card">
+      <NTabPane name="approvals" :tab="t('pages.monitor.tabs.approvals')">
+        <NCard :title="t('pages.monitor.approvals.title')" class="app-card">
           <template #header-extra>
             <NSpace :size="8" align="center" class="app-toolbar">
               <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="approvalsLoading" @click="loadApprovals">
                 <template #icon><NIcon :component="RefreshOutline" /></template>
-                重新加载
+                {{ t('pages.monitor.approvals.reload') }}
               </NButton>
               <NButton
                 type="primary"
@@ -1159,14 +1161,14 @@ onUnmounted(() => {
                 @click="saveApprovals"
               >
                 <template #icon><NIcon :component="SaveOutline" /></template>
-                保存策略
+                {{ t('pages.monitor.approvals.save') }}
               </NButton>
             </NSpace>
           </template>
 
           <NGrid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="10" style="margin-bottom: 8px;">
             <NGridItem>
-              <NFormItem label="目标">
+              <NFormItem :label="t('pages.monitor.approvals.target')">
                 <NSelect
                   v-model:value="approvalsTargetKind"
                   :options="[
@@ -1177,12 +1179,12 @@ onUnmounted(() => {
               </NFormItem>
             </NGridItem>
             <NGridItem v-if="approvalsTargetKind === 'node'">
-              <NFormItem label="节点">
+              <NFormItem :label="t('pages.monitor.approvals.node')">
                 <NSelect
                   v-model:value="approvalsTargetNodeId"
                   :options="nodeOptions"
                   :loading="nodesLoading"
-                  placeholder="选择 nodeId"
+                  :placeholder="t('pages.monitor.approvals.nodePlaceholder')"
                   clearable
                   filterable
                 />
@@ -1196,7 +1198,7 @@ onUnmounted(() => {
             :bordered="false"
             style="margin-bottom: 12px;"
           >
-            当前 Gateway 不支持 <code>exec.approvals.*</code>（或当前节点不支持）。
+            {{ t('pages.monitor.approvals.notSupportedPrefix') }}<code>exec.approvals.*</code>{{ t('pages.monitor.approvals.notSupportedSuffix') }}
           </NAlert>
           <NAlert
             v-else-if="approvalsError"
@@ -1207,20 +1209,23 @@ onUnmounted(() => {
             {{ approvalsError }}
           </NAlert>
           <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 10px;">
-            来源于 <code>exec.approvals.*</code>，支持 Gateway 与节点级策略编辑。
+            {{ t('pages.monitor.approvals.hintPrefix') }}<code>exec.approvals.*</code>{{ t('pages.monitor.approvals.hintSuffix') }}
           </NText>
 
           <div v-if="approvalsSnapshot" class="approvals-meta">
-            <div><strong>文件：</strong>{{ approvalsSnapshot.path }}</div>
+            <div><strong>{{ t('pages.monitor.approvals.meta.file') }}</strong>{{ approvalsSnapshot.path }}</div>
             <div><strong>Hash：</strong>{{ approvalsSnapshot.hash }}</div>
-            <div><strong>状态：</strong>{{ approvalsSnapshot.exists ? '已存在' : '首次创建' }}</div>
+            <div>
+              <strong>{{ t('pages.monitor.approvals.meta.status') }}</strong>
+              {{ approvalsSnapshot.exists ? t('pages.monitor.approvals.meta.exists') : t('pages.monitor.approvals.meta.created') }}
+            </div>
           </div>
 
           <NSpin :show="approvalsLoading">
             <template v-if="approvalsForm">
               <NGrid cols="1 s:2 m:4" responsive="screen" :x-gap="12" :y-gap="10">
                 <NGridItem>
-                  <NFormItem label="默认 security">
+                  <NFormItem :label="t('pages.monitor.approvals.defaults.security')">
                     <NSelect
                       :value="approvalsForm.defaults?.security || null"
                       :options="POLICY_SECURITY_OPTIONS"
@@ -1230,7 +1235,7 @@ onUnmounted(() => {
                   </NFormItem>
                 </NGridItem>
                 <NGridItem>
-                  <NFormItem label="默认 ask">
+                  <NFormItem :label="t('pages.monitor.approvals.defaults.ask')">
                     <NSelect
                       :value="approvalsForm.defaults?.ask || null"
                       :options="POLICY_ASK_OPTIONS"
@@ -1240,7 +1245,7 @@ onUnmounted(() => {
                   </NFormItem>
                 </NGridItem>
                 <NGridItem>
-                  <NFormItem label="默认 askFallback">
+                  <NFormItem :label="t('pages.monitor.approvals.defaults.askFallback')">
                     <NSelect
                       :value="approvalsForm.defaults?.askFallback || null"
                       :options="POLICY_SECURITY_OPTIONS"
@@ -1263,29 +1268,29 @@ onUnmounted(() => {
 
               <NGrid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="10" style="margin-bottom: 10px;">
                 <NGridItem>
-                  <NFormItem label="当前 Agent">
+                  <NFormItem :label="t('pages.monitor.approvals.agent.current')">
                     <NSelect
                       v-model:value="approvalsAgentId"
                       :options="approvalsAgentOptions"
-                      placeholder="选择 Agent"
+                      :placeholder="t('pages.monitor.approvals.agent.currentPlaceholder')"
                     />
                   </NFormItem>
                 </NGridItem>
                 <NGridItem>
-                  <NFormItem label="新增 Agent">
-                    <NInput v-model:value="newAgentId" placeholder="例如 main / analyst" />
+                  <NFormItem :label="t('pages.monitor.approvals.agent.new')">
+                    <NInput v-model:value="newAgentId" :placeholder="t('pages.monitor.approvals.agent.newPlaceholder')" />
                   </NFormItem>
                 </NGridItem>
                 <NGridItem>
-                  <NFormItem label="操作">
+                  <NFormItem :label="t('pages.monitor.approvals.agent.actions')">
                     <NSpace :size="8">
                       <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="addAgent">
                         <template #icon><NIcon :component="AddOutline" /></template>
-                        添加 Agent
+                        {{ t('pages.monitor.approvals.agent.add') }}
                       </NButton>
                       <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="removeCurrentAgent">
                         <template #icon><NIcon :component="TrashOutline" /></template>
-                        删除当前 Agent
+                        {{ t('pages.monitor.approvals.agent.remove') }}
                       </NButton>
                     </NSpace>
                   </NFormItem>
@@ -1337,22 +1342,22 @@ onUnmounted(() => {
                 <div class="allowlist-editor">
                   <div class="allowlist-head">
                     <NText strong>Allowlist</NText>
-                    <NText depth="3">当前 {{ currentAllowlist.length }} 条</NText>
+                    <NText depth="3">{{ t('pages.monitor.approvals.allowlist.count', { count: currentAllowlist.length }) }}</NText>
                   </div>
                   <NSpace :size="8" align="center" style="margin-top: 8px;">
                     <NInput
                       v-model:value="newAllowPattern"
-                      placeholder="例如: ^(ls|cat|pwd)$"
+                      :placeholder="t('pages.monitor.approvals.allowlist.newPlaceholder')"
                       style="max-width: 420px;"
                     />
                     <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="addAllowPattern">
                       <template #icon><NIcon :component="AddOutline" /></template>
-                      新增规则
+                      {{ t('pages.monitor.approvals.allowlist.add') }}
                     </NButton>
                   </NSpace>
 
                   <div v-if="currentAllowlist.length === 0" class="allowlist-empty">
-                    <NText depth="3">当前 Agent 暂无 allowlist 规则。</NText>
+                    <NText depth="3">{{ t('pages.monitor.approvals.allowlist.empty') }}</NText>
                   </div>
 
                   <div
@@ -1363,11 +1368,11 @@ onUnmounted(() => {
                     <NInput
                       :value="entry.pattern"
                       @update:value="(value) => updateAllowPattern(index, value)"
-                      placeholder="规则表达式"
+                      :placeholder="t('pages.monitor.approvals.allowlist.rulePlaceholder')"
                     />
                     <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="removeAllowPattern(index)">
                       <template #icon><NIcon :component="TrashOutline" /></template>
-                      删除
+                      {{ t('common.delete') }}
                     </NButton>
                   </div>
                 </div>
@@ -1376,15 +1381,15 @@ onUnmounted(() => {
 
             <NEmpty
               v-else
-              description="未加载审批策略"
+              :description="t('pages.monitor.approvals.empty')"
               style="padding: 40px 0;"
             />
           </NSpin>
         </NCard>
       </NTabPane>
 
-      <NTabPane name="update" tab="更新与重启（update.run）">
-        <NCard title="更新与重启" class="app-card">
+      <NTabPane name="update" :tab="t('pages.monitor.tabs.update')">
+        <NCard :title="t('pages.monitor.update.title')" class="app-card">
           <template #header-extra>
             <NSpace :size="8" align="center" class="app-toolbar">
               <NButton
@@ -1395,7 +1400,7 @@ onUnmounted(() => {
                 @click="confirmRunUpdate"
               >
                 <template #icon><NIcon :component="DownloadOutline" /></template>
-                执行更新
+                {{ t('pages.monitor.update.actions.run') }}
               </NButton>
               <NButton
                 size="small"
@@ -1404,7 +1409,7 @@ onUnmounted(() => {
                 @click="resetUpdateResult"
               >
                 <template #icon><NIcon :component="TrashOutline" /></template>
-                清空结果
+                {{ t('common.clear') }}
               </NButton>
             </NSpace>
           </template>
@@ -1415,7 +1420,7 @@ onUnmounted(() => {
             :bordered="false"
             style="margin-bottom: 12px;"
           >
-            当前 Gateway 不支持 <code>update.run</code>，请升级后重试。
+            {{ t('pages.monitor.update.notSupportedPrefix') }}<code>update.run</code>{{ t('pages.monitor.update.notSupportedSuffix') }}
           </NAlert>
           <NAlert
             v-else-if="updateError"
@@ -1426,32 +1431,32 @@ onUnmounted(() => {
             {{ updateError }}
           </NAlert>
           <NAlert type="warning" :bordered="false" style="margin-bottom: 12px;">
-            该操作会触发 Gateway 重启，页面连接短暂断开属于预期行为。
+            {{ t('pages.monitor.update.restartWarning') }}
           </NAlert>
 
-          <NCard size="small" embedded class="ops-inner-card" title="执行参数">
+          <NCard size="small" embedded class="ops-inner-card" :title="t('pages.monitor.update.params.title')">
             <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 10px;">
-              可按需指定会话回执目标与超时，未填写时使用网关默认行为。
+              {{ t('pages.monitor.update.params.hint') }}
             </NText>
             <NGrid cols="1 s:2 m:2" responsive="screen" :x-gap="12" :y-gap="10">
               <NGridItem>
-                <NFormItem label="会话键 sessionKey（可选）">
+                <NFormItem :label="t('pages.monitor.update.params.sessionKey')">
                   <NInput
                     v-model:value="updateSessionKey"
-                    placeholder="例如：agent:main:main"
+                    :placeholder="t('pages.monitor.update.params.sessionKeyPlaceholder')"
                   />
                 </NFormItem>
               </NGridItem>
               <NGridItem>
-                <NFormItem label="更新备注 note（可选）">
+                <NFormItem :label="t('pages.monitor.update.params.note')">
                   <NInput
                     v-model:value="updateNote"
-                    placeholder="例如：运维中心手动触发更新"
+                    :placeholder="t('pages.monitor.update.params.notePlaceholder')"
                   />
                 </NFormItem>
               </NGridItem>
               <NGridItem>
-                <NFormItem label="重启延迟 restartDelayMs（毫秒）">
+                <NFormItem :label="t('pages.monitor.update.params.restartDelayMs')">
                   <NInputNumber
                     v-model:value="updateRestartDelayMs"
                     :min="0"
@@ -1462,7 +1467,7 @@ onUnmounted(() => {
                 </NFormItem>
               </NGridItem>
               <NGridItem>
-                <NFormItem label="执行超时 timeoutMs（毫秒）">
+                <NFormItem :label="t('pages.monitor.update.params.timeoutMs')">
                   <NInputNumber
                     v-model:value="updateTimeoutMs"
                     :min="1000"
@@ -1478,45 +1483,45 @@ onUnmounted(() => {
           <div v-if="updateResult || updateRestartInfo || updateLastTriggeredAt" class="update-result-box">
             <div class="update-result-head">
               <NTag :type="updateStatusTagType" :bordered="false" round>
-                {{ updateResult?.status || '未知' }}
+                {{ updateResult?.status || t('pages.monitor.update.statusUnknown') }}
               </NTag>
               <NText depth="3" style="font-size: 12px;">
-                触发时间：{{ updateLastTriggeredAt ? formatDate(updateLastTriggeredAt) : '-' }}
+                {{ t('pages.monitor.update.triggeredAt', { time: updateLastTriggeredAt ? formatDate(updateLastTriggeredAt) : '-' }) }}
               </NText>
               <NText depth="3" style="font-size: 12px;">
-                总耗时：{{ formatDuration(updateResult?.durationMs) }}
+                {{ t('pages.monitor.update.duration', { duration: formatDuration(updateResult?.durationMs) }) }}
               </NText>
             </div>
 
             <NGrid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="10" style="margin-top: 10px;">
               <NGridItem>
                 <div class="ops-meta-item">
-                  <div class="muted">更新模式</div>
+                  <div class="muted">{{ t('pages.monitor.update.meta.mode') }}</div>
                   <div>{{ updateResult?.mode || '-' }}</div>
                 </div>
               </NGridItem>
               <NGridItem>
                 <div class="ops-meta-item">
-                  <div class="muted">重启调度</div>
+                  <div class="muted">{{ t('pages.monitor.update.meta.restart') }}</div>
                   <div>
                     {{
                       updateRestartInfo?.ok
                         ? `OK (${updateRestartInfo.delayMs ?? '-'}ms)`
-                        : (updateRestartInfo?.error || '未返回')
+                        : (updateRestartInfo?.error || t('pages.monitor.update.meta.noResponse'))
                     }}
                   </div>
                 </div>
               </NGridItem>
               <NGridItem>
                 <div class="ops-meta-item">
-                  <div class="muted">失败原因</div>
+                  <div class="muted">{{ t('pages.monitor.update.meta.reason') }}</div>
                   <div>{{ updateResult?.reason || '-' }}</div>
                 </div>
               </NGridItem>
             </NGrid>
 
             <div class="muted" style="margin-top: 8px; font-size: 12px;">
-              哨兵文件：{{ updateResponse?.sentinel?.path || '-' }}
+              {{ t('pages.monitor.update.sentinel', { path: updateResponse?.sentinel?.path || '-' }) }}
             </div>
 
             <div v-if="updateResult?.before || updateResult?.after" class="update-before-after">
@@ -1525,7 +1530,7 @@ onUnmounted(() => {
             </div>
 
             <div v-if="updateSteps.length > 0" class="update-steps">
-              <div class="update-steps-title">步骤回显（{{ updateSteps.length }}）</div>
+              <div class="update-steps-title">{{ t('pages.monitor.update.stepsTitle', { count: updateSteps.length }) }}</div>
               <div
                 v-for="(step, index) in updateSteps"
                 :key="`${step.name}-${index}`"

@@ -23,6 +23,7 @@ import {
 } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { RefreshOutline, SendOutline, StopCircleOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useConfigStore } from '@/stores/config'
@@ -40,6 +41,7 @@ const configStore = useConfigStore()
 const sessionStore = useSessionStore()
 const skillStore = useSkillStore()
 const wsStore = useWebSocketStore()
+const { t, locale } = useI18n()
 
 const sessionKeyInput = ref('')
 const draft = ref('')
@@ -59,12 +61,12 @@ const aborting = ref(false)
 const nowMs = ref(Date.now())
 let nowTimer: ReturnType<typeof setInterval> | null = null
 
-const roleFilterOptions: SelectOption[] = [
-  { label: '全部角色', value: 'all' },
-  { label: '仅用户', value: 'user' },
-  { label: '仅助手', value: 'assistant' },
-  { label: '仅系统', value: 'system' },
-]
+const roleFilterOptions = computed<SelectOption[]>(() => [
+  { label: t('pages.chat.filters.roles.all'), value: 'all' },
+  { label: t('pages.chat.filters.roles.user'), value: 'user' },
+  { label: t('pages.chat.filters.roles.assistant'), value: 'assistant' },
+  { label: t('pages.chat.filters.roles.system'), value: 'system' },
+])
 
 const BOTTOM_GAP = 32
 const QUICK_REPLY_STORAGE_KEY = 'openclaw_chat_quick_replies_v1'
@@ -155,7 +157,7 @@ const currentSessionTokenUsage = computed<SessionTokenUsage | null>(() =>
 )
 
 function formatTokenCount(value: number): string {
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Math.max(0, value))
+  return new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(Math.max(0, value))
 }
 
 const sessionTokenMetricTags = computed(() => {
@@ -163,16 +165,18 @@ const sessionTokenMetricTags = computed(() => {
   if (!usage) return []
 
   return [
-    { key: 'total', label: 'Token', value: formatTokenCount(usage.total), highlight: true },
-    { key: 'input', label: '入', value: formatTokenCount(usage.input), highlight: false },
-    { key: 'output', label: '出', value: formatTokenCount(usage.output), highlight: false },
-    { key: 'cacheRead', label: '缓读', value: formatTokenCount(usage.cacheRead), highlight: false },
-    { key: 'cacheWrite', label: '缓写', value: formatTokenCount(usage.cacheWrite), highlight: false },
+    { key: 'total', label: t('pages.chat.tokens.total'), value: formatTokenCount(usage.total), highlight: true },
+    { key: 'input', label: t('pages.chat.tokens.input'), value: formatTokenCount(usage.input), highlight: false },
+    { key: 'output', label: t('pages.chat.tokens.output'), value: formatTokenCount(usage.output), highlight: false },
+    { key: 'cacheRead', label: t('pages.chat.tokens.cacheRead'), value: formatTokenCount(usage.cacheRead), highlight: false },
+    { key: 'cacheWrite', label: t('pages.chat.tokens.cacheWrite'), value: formatTokenCount(usage.cacheWrite), highlight: false },
   ]
 })
 
 const sessionTokenStatusText = computed(() =>
-  sessionTokenUsageLoading.value ? 'Token 读取中...' : 'Token -'
+  sessionTokenUsageLoading.value
+    ? t('pages.chat.tokens.loading')
+    : t('pages.chat.tokens.unavailable')
 )
 
 function resolveUsageSession(sessions: SessionsUsageSession[], key: string): SessionsUsageSession | null {
@@ -294,7 +298,7 @@ interface SlashCommandPreset {
   command: string
   usage?: string
   description: string
-  category: '常用' | '会话' | '模型与上下文' | '执行与权限'
+  category: string
   aliases?: string[]
   expectArgs?: boolean
   requiresFlag?: string
@@ -315,43 +319,43 @@ interface SlashSuggestionItem {
 }
 
 // 基于 OpenClaw 官方 docs/tools/slash-commands.md 维护的常用命令清单
-const slashCommandPresets: SlashCommandPreset[] = [
+const slashCommandPresets = computed<SlashCommandPreset[]>(() => [
   {
     command: '/new',
     usage: '[model]',
-    description: '重置并启动新会话，可选指定模型',
-    category: '会话',
+    description: t('pages.chat.slash.commands.new.description'),
+    category: t('pages.chat.slash.categories.session'),
     expectArgs: true,
   },
   {
     command: '/skill',
     usage: '<name> [input]',
-    description: '执行技能（自动提示你的技能列表）',
-    category: '模型与上下文',
+    description: t('pages.chat.slash.commands.skill.description'),
+    category: t('pages.chat.slash.categories.modelAndContext'),
     expectArgs: true,
   },
   {
     command: '/model',
     usage: '<name|list|status>',
     aliases: ['/models'],
-    description: '查看或切换模型',
-    category: '模型与上下文',
+    description: t('pages.chat.slash.commands.model.description'),
+    category: t('pages.chat.slash.categories.modelAndContext'),
     expectArgs: true,
   },
   {
     command: '/status',
-    description: '查看当前会话与系统状态',
-    category: '常用',
+    description: t('pages.chat.slash.commands.status.description'),
+    category: t('pages.chat.slash.categories.common'),
   },
-]
+])
 const transcriptLoading = computed(() => chatStore.loading && messageList.value.length === 0)
 const refreshingChatData = computed(() => sessionStore.loading || chatStore.loading)
 const syncHint = computed(() => {
-  if (chatStore.syncing) return '实时同步中...'
+  if (chatStore.syncing) return t('pages.chat.sync.syncing')
   if (chatStore.lastSyncedAt) {
-    return `已同步 ${formatDate(chatStore.lastSyncedAt)}`
+    return t('pages.chat.sync.syncedAt', { time: formatDate(chatStore.lastSyncedAt) })
   }
-  return '未同步'
+  return t('pages.chat.sync.notSynced')
 })
 const syncTagType = computed<'default' | 'success' | 'warning' | 'info'>(() => {
   if (chatStore.syncing) return 'info'
@@ -422,18 +426,26 @@ const agentStatusTagType = computed<'default' | 'success' | 'warning' | 'info' |
 })
 
 const agentStatusText = computed(() => {
-  if (agentBusyToolName.value) return `调用工具：${agentBusyToolName.value}`
+  if (agentBusyToolName.value) return t('pages.chat.agentStatus.toolCall', { name: agentBusyToolName.value })
   const status = chatStore.agentStatus
-  if (status.phase === 'sending') return '消息发送中...'
-  if (status.phase === 'waiting') return '等待响应...'
-  if (status.phase === 'thinking') return status.detail ? status.detail : '思考中...'
-  if (status.phase === 'tool') return status.detail ? `调用工具：${status.detail}` : '调用工具中...'
-  if (status.phase === 'replying') return '回复中...'
-  if (status.phase === 'aborting') return '停止中...'
-  if (status.phase === 'done') return '本轮完成'
-  if (status.phase === 'aborted') return '已停止'
-  if (status.phase === 'error') return status.detail ? `错误：${status.detail}` : '错误'
-  return '空闲'
+  if (status.phase === 'sending') return t('pages.chat.agentStatus.sending')
+  if (status.phase === 'waiting') return t('pages.chat.agentStatus.waiting')
+  if (status.phase === 'thinking') return status.detail ? status.detail : t('pages.chat.agentStatus.thinking')
+  if (status.phase === 'tool') {
+    return status.detail
+      ? t('pages.chat.agentStatus.toolCall', { name: status.detail })
+      : t('pages.chat.agentStatus.toolRunning')
+  }
+  if (status.phase === 'replying') return t('pages.chat.agentStatus.replying')
+  if (status.phase === 'aborting') return t('pages.chat.agentStatus.aborting')
+  if (status.phase === 'done') return t('pages.chat.agentStatus.done')
+  if (status.phase === 'aborted') return t('pages.chat.agentStatus.aborted')
+  if (status.phase === 'error') {
+    return status.detail
+      ? t('pages.chat.agentStatus.errorWithDetail', { detail: status.detail })
+      : t('pages.chat.agentStatus.error')
+  }
+  return t('pages.chat.agentStatus.idle')
 })
 
 const hasAgentDetails = computed(() => {
@@ -452,7 +464,7 @@ const toolElapsedMs = computed(() => {
 
 function formatClock(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '--:--:--'
-  return new Date(ts).toLocaleTimeString('zh-CN', {
+  return new Date(ts).toLocaleTimeString(locale.value, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -476,10 +488,10 @@ async function handleAbort() {
   aborting.value = true
   try {
     await chatStore.abortActiveRun()
-    message.info('已发送停止请求')
+    message.info(t('pages.chat.messages.abortRequested'))
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    message.error(`停止失败：${reason}`)
+    message.error(t('pages.chat.messages.abortFailed', { reason }))
   } finally {
     aborting.value = false
   }
@@ -550,8 +562,9 @@ const slashCommandKeyword = computed(() => {
 const slashCommandOptions = computed<SlashCommandPreset[]>(() => {
   if (!slashMode.value) return []
   const query = slashCommandKeyword.value
-  if (!query) return slashCommandPresets
-  return slashCommandPresets.filter((item) => {
+  const presets = slashCommandPresets.value
+  if (!query) return presets
+  return presets.filter((item) => {
     const primary = item.command.slice(1).toLowerCase()
     if (primary.includes(query)) return true
     return (item.aliases || []).some((alias) => alias.slice(1).toLowerCase().includes(query))
@@ -563,10 +576,10 @@ const slashModelMode = computed(() =>
 )
 
 function skillSourceLabel(source: Skill['source']): string {
-  if (source === 'workspace') return '用户创建'
-  if (source === 'managed') return '用户安装'
-  if (source === 'extra') return '外部插件'
-  return '内置'
+  if (source === 'workspace') return t('pages.skills.sources.workspace')
+  if (source === 'managed') return t('pages.skills.sources.managed')
+  if (source === 'extra') return t('pages.skills.sources.extra')
+  return t('pages.skills.sources.bundled')
 }
 
 const availableSkills = computed(() =>
@@ -1006,10 +1019,10 @@ function roleType(role: string): 'default' | 'success' | 'info' | 'warning' {
 }
 
 function roleLabel(role: string): string {
-  if (role === 'user') return '用户'
-  if (role === 'assistant') return '助手'
-  if (role === 'tool') return '工具'
-  if (role === 'system') return '系统'
+  if (role === 'user') return t('pages.chat.roles.user')
+  if (role === 'assistant') return t('pages.chat.roles.assistant')
+  if (role === 'tool') return t('pages.chat.roles.tool')
+  if (role === 'system') return t('pages.chat.roles.system')
   return role
 }
 
@@ -1415,14 +1428,14 @@ function openEditQuickReply(item: { id: string; title: string; content: string }
 function handleDeleteQuickReply(id: string) {
   quickReplies.value = quickReplies.value.filter((item) => item.id !== id)
   persistQuickReplies()
-  message.success('已删除常用对话')
+  message.success(t('pages.chat.quickReplies.messages.deleted'))
 }
 
 function handleInsertQuickReply(item: { title: string; content: string }) {
   const text = item.content.trim()
   if (!text) return
   draft.value = draft.value.trim() ? `${draft.value}\n${text}` : text
-  message.success(`已插入：${item.title}`)
+  message.success(t('pages.chat.quickReplies.messages.inserted', { title: item.title }))
 }
 
 async function handleSendQuickReply(item: { content: string }) {
@@ -1434,11 +1447,11 @@ function handleSaveQuickReply() {
   const title = quickReplyForm.title.trim()
   const content = quickReplyForm.content.trim()
   if (!title) {
-    message.warning('请输入常用对话标题')
+    message.warning(t('pages.chat.quickReplies.messages.titleRequired'))
     return
   }
   if (!content) {
-    message.warning('请输入常用对话内容')
+    message.warning(t('pages.chat.quickReplies.messages.contentRequired'))
     return
   }
 
@@ -1448,7 +1461,7 @@ function handleSaveQuickReply() {
         ? { ...item, title, content, updatedAt: Date.now() }
         : item
     )
-    message.success('常用对话已更新')
+    message.success(t('pages.chat.quickReplies.messages.updated'))
   } else {
     quickReplies.value = [
       {
@@ -1459,7 +1472,7 @@ function handleSaveQuickReply() {
       },
       ...quickReplies.value,
     ]
-    message.success('常用对话已新增')
+    message.success(t('pages.chat.quickReplies.messages.created'))
   }
 
   persistQuickReplies()
@@ -1469,9 +1482,9 @@ function handleSaveQuickReply() {
 async function handleCopyWorkspaceDir() {
   try {
     await navigator.clipboard.writeText(workspaceQuickReplyDir.value)
-    message.success('已复制 workspace 建议目录')
+    message.success(t('pages.chat.quickReplies.messages.dirCopied'))
   } catch {
-    message.warning('复制失败，请手动复制目录路径')
+    message.warning(t('pages.chat.quickReplies.messages.dirCopyFailed'))
   }
 }
 
@@ -1767,7 +1780,7 @@ async function handleSend() {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="在线对话（工作台）" class="app-card">
+    <NCard :title="t('pages.chat.title')" class="app-card">
       <template #header-extra>
         <NSpace :size="8" class="app-toolbar">
           <div v-if="sessionTokenMetricTags.length" class="chat-token-metrics">
@@ -1789,7 +1802,7 @@ async function handleSend() {
           </NTag>
           <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="refreshingChatData" @click="handleRefreshChatData">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新聊天数据
+            {{ t('pages.chat.actions.refreshChat') }}
           </NButton>
         </NSpace>
       </template>
@@ -1800,27 +1813,27 @@ async function handleSend() {
             <NSpace vertical :size="12">
               <div class="chat-side-stats">
                 <div class="chat-stat-item">
-                  <span class="chat-stat-label">总消息</span>
+                  <span class="chat-stat-label">{{ t('pages.chat.stats.total') }}</span>
                   <strong>{{ stats.total }}</strong>
                 </div>
                 <div class="chat-stat-item">
-                  <span class="chat-stat-label">助手回复</span>
+                  <span class="chat-stat-label">{{ t('pages.chat.stats.assistant') }}</span>
                   <strong>{{ stats.assistant }}</strong>
                 </div>
                 <div class="chat-stat-item">
-                  <span class="chat-stat-label">最近消息</span>
+                  <span class="chat-stat-label">{{ t('pages.chat.stats.lastMessage') }}</span>
                   <strong>{{ stats.lastMessageAt }}</strong>
                 </div>
               </div>
 
               <div>
-                <NText depth="3" style="font-size: 12px;">会话 Key</NText>
+                <NText depth="3" style="font-size: 12px;">{{ t('pages.chat.sessionKey') }}</NText>
                 <NSelect
                   v-model:value="sessionKeyInput"
                   :options="sessionOptions"
                   filterable
                   tag
-                  placeholder="输入或选择会话 Key（选中后自动加载）"
+                  :placeholder="t('pages.chat.sessionKeyPlaceholder')"
                   style="min-width: 240px; margin-top: 6px;"
                   @update:value="handleSessionKeyChange"
                 />
@@ -1828,14 +1841,14 @@ async function handleSend() {
 
               <div class="chat-quick-panel">
                 <NSpace justify="space-between" align="center">
-                  <NText strong>常用对话</NText>
-                  <NButton size="tiny" type="primary" secondary @click="openCreateQuickReply">新增</NButton>
+                  <NText strong>{{ t('pages.chat.quickReplies.title') }}</NText>
+                  <NButton size="tiny" type="primary" secondary @click="openCreateQuickReply">{{ t('pages.chat.quickReplies.add') }}</NButton>
                 </NSpace>
                 <NInput
                   v-model:value="quickReplySearch"
                   size="small"
                   style="margin-top: 8px;"
-                  placeholder="搜索标题/内容"
+                  :placeholder="t('pages.chat.quickReplies.searchPlaceholder')"
                 />
 
                 <div v-if="filteredQuickReplies.length" class="chat-quick-list">
@@ -1848,45 +1861,45 @@ async function handleSend() {
                         </NText>
                       </div>
                       <NSpace :size="2">
-                        <NButton size="tiny" text @click="handleInsertQuickReply(item)">插入</NButton>
-                        <NButton size="tiny" text type="primary" @click="handleSendQuickReply(item)">发送</NButton>
-                        <NButton size="tiny" text @click="openEditQuickReply(item)">编辑</NButton>
+                        <NButton size="tiny" text @click="handleInsertQuickReply(item)">{{ t('pages.chat.quickReplies.insert') }}</NButton>
+                        <NButton size="tiny" text type="primary" @click="handleSendQuickReply(item)">{{ t('pages.chat.actions.send') }}</NButton>
+                        <NButton size="tiny" text @click="openEditQuickReply(item)">{{ t('common.edit') }}</NButton>
                         <NPopconfirm
-                          positive-text="删除"
-                          negative-text="取消"
+                          :positive-text="t('common.delete')"
+                          :negative-text="t('common.cancel')"
                           @positive-click="handleDeleteQuickReply(item.id)"
                         >
                           <template #trigger>
-                            <NButton size="tiny" text type="error">删除</NButton>
+                            <NButton size="tiny" text type="error">{{ t('common.delete') }}</NButton>
                           </template>
-                          确认删除该条常用对话？
+                          {{ t('pages.chat.quickReplies.confirmDelete') }}
                         </NPopconfirm>
                       </NSpace>
                     </NSpace>
                   </div>
                 </div>
-                <NEmpty v-else description="暂无常用对话" style="padding: 14px 0 8px;" />
+                <NEmpty v-else :description="t('pages.chat.quickReplies.empty')" style="padding: 14px 0 8px;" />
 
                 <div class="chat-quick-footnote">
                   <NText depth="3" style="font-size: 12px;">
-                    存储位置：当前浏览器。按官方建议，长期可维护内容可放到 workspace。
+                    {{ t('pages.chat.quickReplies.storageHint') }}
                   </NText>
                   <NText depth="3" style="display: block; font-size: 12px; margin-top: 4px;">
-                    建议目录：<code>{{ workspaceQuickReplyDir }}</code>
+                    {{ t('pages.chat.quickReplies.dirLabel') }}<code>{{ workspaceQuickReplyDir }}</code>
                   </NText>
                   <NButton size="tiny" text @click="handleCopyWorkspaceDir" style="margin-top: 4px;">
-                    复制目录
+                    {{ t('pages.chat.quickReplies.copyDir') }}
                   </NButton>
                 </div>
               </div>
 
               <div class="chat-side-switches">
                 <NSpace justify="space-between" align="center">
-                  <NText>自动跟随最新消息</NText>
+                  <NText>{{ t('pages.chat.preferences.autoFollow') }}</NText>
                   <NSwitch v-model:value="autoFollowBottom" />
                 </NSpace>
                 <NSpace justify="space-between" align="center" style="margin-top: 8px;">
-                  <NText>消息筛选</NText>
+                  <NText>{{ t('pages.chat.filters.title') }}</NText>
                   <NSelect
                     v-model:value="roleFilter"
                     size="small"
@@ -1910,7 +1923,7 @@ async function handleSend() {
                   <code>{{ selectedSession?.peer || sessionMeta.peer || '-' }}</code>
                 </div>
                 <div class="chat-kv-row">
-                  <span>模型</span>
+                  <span>{{ t('pages.chat.session.model') }}</span>
                   <code>{{ selectedSession?.model || '-' }}</code>
                 </div>
               </div>
@@ -1924,14 +1937,14 @@ async function handleSend() {
               <NSpace justify="space-between" align="center" style="margin-bottom: 10px;">
                 <NSpace align="center" :size="8">
                   <NTag size="small" type="info" :bordered="false" round>
-                    会话 {{ normalizedSessionKey }}
+                    {{ t('pages.chat.sessionTag', { key: normalizedSessionKey }) }}
                   </NTag>
                   <NTag size="small" :type="syncTagType" :bordered="false" round>
                     {{ syncHint }}
                   </NTag>
                 </NSpace>
                 <NText depth="3" style="font-size: 12px;">
-                  用户 {{ stats.user }} / 助手 {{ stats.assistant }} / 系统 {{ stats.system }}
+                  {{ t('pages.chat.stats.breakdown', { user: stats.user, assistant: stats.assistant, system: stats.system }) }}
                 </NText>
               </NSpace>
 
@@ -1967,8 +1980,8 @@ async function handleSend() {
                               class="thinking-card"
                             >
                               <NSpace align="center" justify="space-between">
-                                <NSpace align="center" :size="6">
-                                  <NTag size="small" type="info" :bordered="false" round>思考</NTag>
+                                  <NSpace align="center" :size="6">
+                                  <NTag size="small" type="info" :bordered="false" round>{{ t('pages.chat.structured.thinking') }}</NTag>
                                   <NText depth="3" style="font-size: 12px;">{{ thinking.type || 'thinking' }}</NText>
                                 </NSpace>
                                 <NTag
@@ -1978,7 +1991,7 @@ async function handleSend() {
                                   :bordered="false"
                                   round
                                 >
-                                  已签名
+                                  {{ t('pages.chat.structured.signed') }}
                                 </NTag>
                               </NSpace>
 
@@ -1988,11 +2001,11 @@ async function handleSend() {
                                 v-if="thinking.signatureId || thinking.summaryText || thinking.hasEncryptedSignature"
                                 class="thinking-details"
                               >
-                                <summary>查看签名信息</summary>
+                                <summary>{{ t('pages.chat.structured.signature.details') }}</summary>
                                 <div class="tool-call-grid">
-                                  <span class="tool-call-label">签名 ID</span>
+                                  <span class="tool-call-label">{{ t('pages.chat.structured.signature.id') }}</span>
                                   <code>{{ thinking.signatureId || '-' }}</code>
-                                  <span class="tool-call-label">摘要</span>
+                                  <span class="tool-call-label">{{ t('pages.chat.structured.signature.summary') }}</span>
                                   <div class="thinking-summary">{{ thinking.summaryText || '-' }}</div>
                                 </div>
                               </details>
@@ -2005,27 +2018,27 @@ async function handleSend() {
                               :key="`${entry.key}-tool-${toolIndex}`"
                               class="tool-call-card"
                             >
-                              <NSpace align="center" justify="space-between">
-                                <NSpace align="center" :size="6">
-                                  <NTag size="small" type="warning" :bordered="false" round>工具调用</NTag>
+                                <NSpace align="center" justify="space-between">
+                                  <NSpace align="center" :size="6">
+                                  <NTag size="small" type="warning" :bordered="false" round>{{ t('pages.chat.structured.toolCall') }}</NTag>
                                   <NText strong>{{ tool.name }}</NText>
                                 </NSpace>
                                 <NText v-if="tool.timeout" depth="3" style="font-size: 12px;">
-                                  超时 {{ tool.timeout }}s
+                                  {{ t('pages.chat.structured.timeout', { seconds: tool.timeout }) }}
                                 </NText>
                               </NSpace>
 
                               <div class="tool-call-grid">
-                                <span class="tool-call-label">命令</span>
+                                <span class="tool-call-label">{{ t('pages.chat.structured.command') }}</span>
                                 <code>{{ tool.command || '-' }}</code>
-                                <span class="tool-call-label">目录</span>
+                                <span class="tool-call-label">{{ t('pages.chat.structured.workdir') }}</span>
                                 <code>{{ tool.workdir || '-' }}</code>
-                                <span class="tool-call-label">调用 ID</span>
+                                <span class="tool-call-label">{{ t('pages.chat.structured.callId') }}</span>
                                 <code>{{ tool.id || '-' }}</code>
                               </div>
 
                               <details v-if="tool.partialJson" class="tool-call-details">
-                                <summary>查看 partialJson</summary>
+                                <summary>{{ t('pages.chat.structured.viewPartialJson') }}</summary>
                                 <pre>{{ tool.partialJson }}</pre>
                               </details>
                             </div>
@@ -2037,9 +2050,9 @@ async function handleSend() {
                               :key="`${entry.key}-tool-result-${resultIndex}`"
                               class="tool-result-card"
                             >
-                              <NSpace align="center" justify="space-between">
-                                <NSpace align="center" :size="6">
-                                  <NTag size="small" type="success" :bordered="false" round>工具结果</NTag>
+                                <NSpace align="center" justify="space-between">
+                                  <NSpace align="center" :size="6">
+                                  <NTag size="small" type="success" :bordered="false" round>{{ t('pages.chat.structured.toolResult') }}</NTag>
                                   <NText strong>{{ result.name || 'unknown' }}</NText>
                                 </NSpace>
                                 <NText v-if="result.status" depth="3" style="font-size: 12px;">
@@ -2048,9 +2061,9 @@ async function handleSend() {
                               </NSpace>
 
                               <div class="tool-call-grid">
-                                <span class="tool-call-label">调用 ID</span>
+                                <span class="tool-call-label">{{ t('pages.chat.structured.callId') }}</span>
                                 <code>{{ result.id || '-' }}</code>
-                                <span class="tool-call-label">内容</span>
+                                <span class="tool-call-label">{{ t('pages.chat.structured.content') }}</span>
                                 <pre class="tool-result-content">{{ result.content }}</pre>
                               </div>
                             </div>
@@ -2062,18 +2075,18 @@ async function handleSend() {
                               :key="`${entry.key}-validation-${validationIndex}`"
                               class="validation-error-card"
                             >
-                              <NSpace align="center" justify="space-between">
-                                <NSpace align="center" :size="6">
-                                  <NTag size="small" type="warning" :bordered="false" round>参数校验失败</NTag>
+                                <NSpace align="center" justify="space-between">
+                                  <NSpace align="center" :size="6">
+                                  <NTag size="small" type="warning" :bordered="false" round>{{ t('pages.chat.structured.validationFailed') }}</NTag>
                                   <NText strong>{{ validation.toolName }}</NText>
                                 </NSpace>
                                 <NText depth="3" style="font-size: 12px;">
-                                  {{ validation.issues.length }} 项问题
+                                  {{ t('pages.chat.structured.issuesCount', { count: validation.issues.length }) }}
                                 </NText>
                               </NSpace>
 
                               <div class="tool-call-grid">
-                                <span class="tool-call-label">问题</span>
+                                <span class="tool-call-label">{{ t('pages.chat.structured.issues') }}</span>
                                 <div class="validation-issues">
                                   <div v-if="validation.issues.length === 0">-</div>
                                   <div v-for="(issue, issueIndex) in validation.issues" :key="issueIndex">
@@ -2083,7 +2096,7 @@ async function handleSend() {
                               </div>
 
                               <details v-if="validation.argumentsText" class="tool-call-details">
-                                <summary>查看入参</summary>
+                                <summary>{{ t('pages.chat.structured.viewArgs') }}</summary>
                                 <pre>{{ validation.argumentsText }}</pre>
                               </details>
                             </div>
@@ -2107,7 +2120,7 @@ async function handleSend() {
 
                     <NEmpty
                       v-else
-                      :description="visibleMessageList.length ? '当前筛选下无消息' : '暂无消息'"
+                      :description="visibleMessageList.length ? t('pages.chat.messages.emptyFiltered') : t('common.noMessages')"
                       style="padding: 72px 0;"
                     />
                   </div>
@@ -2121,14 +2134,14 @@ async function handleSend() {
                   v-model:value="draft"
                   type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }"
-                  placeholder="输入消息（输入 / 可查看 OpenClaw 命令）"
+                  :placeholder="t('pages.chat.input.placeholder')"
                   @keydown="handleDraftKeydown"
                 />
 
                 <div v-if="slashMode" class="chat-slash-panel">
                   <div class="chat-slash-head">
-                    <NText depth="3" style="font-size: 12px;">OpenClaw 斜杠命令</NText>
-                    <NText depth="3" style="font-size: 12px;">↑/↓ 选择，Tab 应用，Enter 应用或发送，Esc 退出</NText>
+                    <NText depth="3" style="font-size: 12px;">{{ t('pages.chat.slash.title') }}</NText>
+                    <NText depth="3" style="font-size: 12px;">{{ t('pages.chat.slash.hint') }}</NText>
                   </div>
                   <div v-if="slashSuggestions.length" class="chat-slash-list">
                     <button
@@ -2149,7 +2162,9 @@ async function handleSend() {
                         </div>
                         <div class="chat-slash-line chat-slash-desc">
                           <span>{{ item.preset.description }}</span>
-                          <span v-if="item.preset.requiresFlag" class="chat-slash-flag">需 {{ item.preset.requiresFlag }}</span>
+                          <span v-if="item.preset.requiresFlag" class="chat-slash-flag">
+                            {{ t('pages.chat.slash.requiresFlag', { flag: item.preset.requiresFlag }) }}
+                          </span>
                         </div>
                       </div>
                       <div v-else-if="item.kind === 'skill' && item.skill">
@@ -2160,7 +2175,7 @@ async function handleSend() {
                           </NTag>
                         </div>
                         <div class="chat-slash-line chat-slash-desc">
-                          <span>{{ item.skill.description || '无描述' }}</span>
+                          <span>{{ item.skill.description || t('common.noDescription') }}</span>
                           <span v-if="item.skill.version" class="chat-slash-flag">v{{ item.skill.version }}</span>
                         </div>
                       </div>
@@ -2173,20 +2188,20 @@ async function handleSend() {
                         </div>
                         <div class="chat-slash-line chat-slash-desc">
                           <span>{{ item.model.modelId }}</span>
-                          <span class="chat-slash-flag">来自当前配置</span>
+                          <span class="chat-slash-flag">{{ t('pages.chat.slash.fromConfig') }}</span>
                         </div>
                       </div>
                     </button>
                   </div>
                   <div v-else class="chat-slash-empty">
                     <template v-if="slashSkillMode">
-                      {{ skillStore.loading ? '正在加载技能列表...' : '没有匹配技能（可在技能管理开启“Chat 显示内置”，或在技能卡片上打开 Chat 开关）。' }}
+                      {{ skillStore.loading ? t('pages.chat.slash.skills.loading') : t('pages.chat.slash.skills.noMatch') }}
                     </template>
                     <template v-else-if="slashModelMode">
-                      {{ configStore.loading ? '正在读取配置模型...' : '没有匹配模型，或当前未配置模型。' }}
+                      {{ configStore.loading ? t('pages.chat.slash.models.loading') : t('pages.chat.slash.models.noMatch') }}
                     </template>
                     <template v-else>
-                      没有匹配命令，仅支持 /new、/skill、/model、/status。
+                      {{ t('pages.chat.slash.commands.noMatch') }}
                     </template>
                   </div>
                 </div>
@@ -2208,7 +2223,7 @@ async function handleSend() {
                       text
                       @click="showAgentDetails = !showAgentDetails"
                     >
-                      {{ showAgentDetails ? '收起详情' : '详情' }}
+                      {{ showAgentDetails ? t('pages.chat.agentDetails.hide') : t('pages.chat.agentDetails.show') }}
                     </NButton>
                   </NSpace>
                 </div>
@@ -2216,7 +2231,7 @@ async function handleSend() {
                 <div v-if="showAgentDetails && hasAgentDetails" class="chat-agent-details">
                   <NSpace vertical :size="6">
                     <NText depth="3" style="font-size: 12px;">
-                      当前阶段已持续 {{ formatDurationMs(nowMs - chatStore.agentStatus.sinceMs) }}
+                      {{ t('pages.chat.agentDetails.phaseDuration', { duration: formatDurationMs(nowMs - chatStore.agentStatus.sinceMs) }) }}
                     </NText>
 
                     <div v-if="chatStore.agentSteps.length" class="chat-agent-steps">
@@ -2228,32 +2243,32 @@ async function handleSend() {
 
                     <div v-if="chatStore.toolProgress" class="chat-tool-progress">
                       <div class="chat-tool-progress__title">
-                        <span>工具：{{ chatStore.toolProgress.name }}</span>
+                        <span>{{ t('pages.chat.agentDetails.tool', { name: chatStore.toolProgress.name }) }}</span>
                         <span v-if="chatStore.toolProgress.meta" class="chat-tool-progress__meta">{{ chatStore.toolProgress.meta }}</span>
                       </div>
                       <div class="chat-tool-progress__kv">
-                        <span class="chat-tool-progress__k">调用 ID</span>
+                        <span class="chat-tool-progress__k">{{ t('pages.chat.structured.callId') }}</span>
                         <code class="chat-tool-progress__v">{{ chatStore.toolProgress.toolCallId }}</code>
-                        <span class="chat-tool-progress__k">阶段</span>
+                        <span class="chat-tool-progress__k">{{ t('pages.chat.agentDetails.phase') }}</span>
                         <code class="chat-tool-progress__v">{{ chatStore.toolProgress.phase }}</code>
-                        <span class="chat-tool-progress__k">耗时</span>
+                        <span class="chat-tool-progress__k">{{ t('pages.chat.agentDetails.elapsed') }}</span>
                         <code class="chat-tool-progress__v">
                           {{ formatDurationMs(toolElapsedMs) }}
                         </code>
                       </div>
 
                       <details v-if="chatStore.toolProgress.argsPreview" class="chat-tool-progress__details">
-                        <summary>查看入参</summary>
+                        <summary>{{ t('pages.chat.structured.viewArgs') }}</summary>
                         <pre>{{ chatStore.toolProgress.argsPreview }}</pre>
                       </details>
 
                       <details v-if="chatStore.toolProgress.partialPreview" class="chat-tool-progress__details">
-                        <summary>查看 partialResult</summary>
+                        <summary>{{ t('pages.chat.agentDetails.viewPartialResult') }}</summary>
                         <pre>{{ chatStore.toolProgress.partialPreview }}</pre>
                       </details>
 
                       <details v-if="chatStore.toolProgress.resultPreview" class="chat-tool-progress__details">
-                        <summary>查看 result</summary>
+                        <summary>{{ t('pages.chat.agentDetails.viewResult') }}</summary>
                         <pre>{{ chatStore.toolProgress.resultPreview }}</pre>
                       </details>
 
@@ -2262,7 +2277,7 @@ async function handleSend() {
                         depth="3"
                         style="font-size: 12px; color: var(--danger-color);"
                       >
-                        工具执行失败（已返回错误结果）
+                        {{ t('pages.chat.agentDetails.toolFailed') }}
                       </NText>
                     </div>
                   </NSpace>
@@ -2270,11 +2285,11 @@ async function handleSend() {
 
                 <NSpace justify="space-between" align="center">
                   <NText depth="3" style="font-size: 12px;">
-                    当前发送到：{{ normalizedSessionKey }} ｜ Enter 发送，Shift+Enter 换行，Ctrl/Cmd+Enter 发送
+                    {{ t('pages.chat.input.sendHint', { key: normalizedSessionKey }) }}
                   </NText>
                   <NSpace :size="8">
                     <NButton size="small" secondary :disabled="!draft" @click="draft = ''">
-                      清空输入
+                      {{ t('pages.chat.actions.clearInput') }}
                     </NButton>
                     <NButton
                       v-if="agentBusy"
@@ -2286,11 +2301,11 @@ async function handleSend() {
                       @click="handleAbort"
                     >
                       <template #icon><NIcon :component="StopCircleOutline" /></template>
-                      停止
+                      {{ t('pages.chat.actions.stop') }}
                     </NButton>
                     <NButton size="small" type="primary" :loading="agentBusy" :disabled="agentBusy" @click="handleSend">
                       <template #icon><NIcon :component="SendOutline" /></template>
-                      发送
+                      {{ t('pages.chat.actions.send') }}
                     </NButton>
                   </NSpace>
                 </NSpace>
@@ -2308,27 +2323,31 @@ async function handleSend() {
     <NModal
       v-model:show="showQuickReplyModal"
       preset="card"
-      :title="quickReplyModalMode === 'edit' ? '编辑常用对话' : '新增常用对话'"
+      :title="quickReplyModalMode === 'edit'
+        ? t('pages.chat.quickReplies.modal.editTitle')
+        : t('pages.chat.quickReplies.modal.createTitle')"
       style="width: 640px; max-width: calc(100vw - 28px);"
     >
       <NForm label-placement="left" label-width="72">
-        <NFormItem label="标题" required>
-          <NInput v-model:value="quickReplyForm.title" placeholder="例如：确认需求澄清" />
+        <NFormItem :label="t('pages.chat.quickReplies.modal.title')" required>
+          <NInput v-model:value="quickReplyForm.title" :placeholder="t('pages.chat.quickReplies.modal.titlePlaceholder')" />
         </NFormItem>
-        <NFormItem label="内容" required>
+        <NFormItem :label="t('pages.chat.quickReplies.modal.content')" required>
           <NInput
             v-model:value="quickReplyForm.content"
             type="textarea"
             :autosize="{ minRows: 4, maxRows: 10 }"
-            placeholder="输入常用对话正文"
+            :placeholder="t('pages.chat.quickReplies.modal.contentPlaceholder')"
           />
         </NFormItem>
       </NForm>
       <template #footer>
         <NSpace justify="end">
-          <NButton @click="showQuickReplyModal = false">取消</NButton>
+          <NButton @click="showQuickReplyModal = false">{{ t('common.cancel') }}</NButton>
           <NButton type="primary" @click="handleSaveQuickReply">
-            {{ quickReplyModalMode === 'edit' ? '保存修改' : '新增' }}
+            {{ quickReplyModalMode === 'edit'
+              ? t('pages.chat.quickReplies.modal.saveChanges')
+              : t('pages.chat.quickReplies.add') }}
           </NButton>
         </NSpace>
       </template>

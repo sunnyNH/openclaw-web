@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { OpenClawWebSocket } from '@/api/websocket'
 import { RPCClient } from '@/api/rpc-client'
 import { ConnectionState } from '@/api/types'
+import { byLocale, getActiveLocale } from '@/i18n/text'
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -57,7 +58,12 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
     ws.value.on('disconnected', (code: unknown, reason: unknown) => {
       if (state.value !== ConnectionState.DISCONNECTED && state.value !== ConnectionState.FAILED) {
-        lastError.value = `连接断开 (code: ${String(code)}, reason: ${String(reason || 'n/a')})`
+        const locale = getActiveLocale()
+        lastError.value = byLocale(
+          `连接断开 (code: ${String(code)}, reason: ${String(reason || 'n/a')})`,
+          `Connection closed (code: ${String(code)}, reason: ${String(reason || 'n/a')})`,
+          locale,
+        )
       }
     })
 

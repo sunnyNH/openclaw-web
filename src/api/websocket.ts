@@ -1,5 +1,6 @@
 import { ConnectionState, type RPCFrame, type RPCEvent, type RPCResponse } from './types'
 import { buildConnectParams } from './connect'
+import { byLocale, getActiveLocale } from '@/i18n/text'
 
 type EventHandler = (...args: unknown[]) => void
 
@@ -61,7 +62,7 @@ export class OpenClawWebSocket {
   disconnect(): void {
     this.clearTimers()
     this.pendingConnectId = null
-    this.clearMessageQueue('连接已断开，未发送请求已丢弃')
+    this.clearMessageQueue(byLocale('连接已断开，未发送请求已丢弃', 'Connection closed. Dropped unsent requests.', getActiveLocale()))
     this._state = ConnectionState.DISCONNECTED
     if (this.ws) {
       this.ws.onclose = null
@@ -77,14 +78,21 @@ export class OpenClawWebSocket {
       this.ws.send(serialized)
     } else {
       if (data.type === 'req' && !this.shouldQueueRequest(data.method)) {
-        this.rejectRequestImmediately(data.id, `连接未就绪，已拒绝请求: ${data.method}`)
+        const locale = getActiveLocale()
+        this.rejectRequestImmediately(
+          data.id,
+          byLocale(`连接未就绪，已拒绝请求: ${data.method}`, `Connection not ready. Rejected request: ${data.method}`, locale),
+        )
         return
       }
 
       if (this.messageQueue.length >= MAX_QUEUED_MESSAGES) {
         const dropped = this.messageQueue.shift()
         if (dropped?.frame.type === 'req') {
-          this.rejectRequestImmediately(dropped.frame.id, '请求队列已满，最早请求已丢弃')
+          this.rejectRequestImmediately(
+            dropped.frame.id,
+            byLocale('请求队列已满，最早请求已丢弃', 'Request queue full. Dropped the oldest request.', getActiveLocale()),
+          )
         }
       }
 
@@ -198,7 +206,7 @@ export class OpenClawWebSocket {
       return
     }
 
-    const reason = frame.error?.message ?? 'Gateway connect 握手失败'
+    const reason = frame.error?.message ?? byLocale('Gateway connect 握手失败', 'Gateway connect handshake failed', getActiveLocale())
     this.setState(ConnectionState.FAILED)
     this.emit('error', reason)
     this.emit('failed', reason)
@@ -212,7 +220,7 @@ export class OpenClawWebSocket {
     this.connectTimer = setTimeout(() => {
       if (!this.pendingConnectId) return
       this.pendingConnectId = null
-      const reason = 'Gateway connect 握手超时'
+      const reason = byLocale('Gateway connect 握手超时', 'Gateway connect handshake timeout', getActiveLocale())
       this.setState(ConnectionState.FAILED)
       this.emit('error', reason)
       this.emit('failed', reason)

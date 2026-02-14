@@ -1,20 +1,28 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NTag } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
 import { ConnectionState } from '@/api/types'
 
 const wsStore = useWebSocketStore()
+const { t } = useI18n()
 
-const statusMap: Record<ConnectionState, { label: string; type: 'success' | 'warning' | 'error' | 'info' }> = {
-  [ConnectionState.CONNECTED]: { label: '已连接', type: 'success' },
-  [ConnectionState.CONNECTING]: { label: '连接中...', type: 'info' },
-  [ConnectionState.RECONNECTING]: { label: '重连中...', type: 'warning' },
-  [ConnectionState.DISCONNECTED]: { label: '已断开', type: 'error' },
-  [ConnectionState.FAILED]: { label: '连接失败', type: 'error' },
-}
-
-const status = computed(() => statusMap[wsStore.state])
+const status = computed(() => {
+  switch (wsStore.state) {
+    case ConnectionState.CONNECTED:
+      return { label: t('components.connectionStatus.connected'), type: 'success' as const }
+    case ConnectionState.CONNECTING:
+      return { label: t('components.connectionStatus.connecting'), type: 'info' as const }
+    case ConnectionState.RECONNECTING:
+      return { label: t('components.connectionStatus.reconnecting'), type: 'warning' as const }
+    case ConnectionState.FAILED:
+      return { label: t('components.connectionStatus.failed'), type: 'error' as const }
+    case ConnectionState.DISCONNECTED:
+    default:
+      return { label: t('components.connectionStatus.disconnected'), type: 'error' as const }
+  }
+})
 </script>
 
 <template>

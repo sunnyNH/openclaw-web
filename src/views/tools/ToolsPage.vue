@@ -11,11 +11,13 @@ import {
   NSpin,
 } from 'naive-ui'
 import { RefreshOutline, SearchOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
 import type { Tool } from '@/api/types'
 import { h } from 'vue'
 
 const wsStore = useWebSocketStore()
+const { t } = useI18n()
 const tools = ref<Tool[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
@@ -28,9 +30,9 @@ const filteredTools = computed(() => {
   )
 })
 
-const columns = [
+const columns = computed(() => ([
   {
-    title: '工具名称',
+    title: t('pages.tools.columns.name'),
     key: 'name',
     width: 160,
     render(row: Tool) {
@@ -42,7 +44,7 @@ const columns = [
     },
   },
   {
-    title: '分类',
+    title: t('pages.tools.columns.category'),
     key: 'category',
     width: 100,
     render(row: Tool) {
@@ -50,12 +52,12 @@ const columns = [
     },
   },
   {
-    title: '描述',
+    title: t('pages.tools.columns.description'),
     key: 'description',
     ellipsis: { tooltip: true },
   },
   {
-    title: '状态',
+    title: t('pages.tools.columns.status'),
     key: 'enabled',
     width: 80,
     render(row: Tool) {
@@ -67,11 +69,11 @@ const columns = [
           bordered: false,
           round: true,
         },
-        { default: () => (row.enabled ? '启用' : '禁用') }
+        { default: () => (row.enabled ? t('common.enabled') : t('common.disabled')) }
       )
     },
   },
-]
+]))
 
 async function fetchTools() {
   loading.value = true
@@ -88,12 +90,12 @@ onMounted(fetchTools)
 </script>
 
 <template>
-  <NCard title="工具管理" class="app-card">
+  <NCard :title="t('pages.tools.title')" class="app-card">
     <template #header-extra>
       <NSpace :size="8" class="app-toolbar">
         <NInput
           v-model:value="searchQuery"
-          placeholder="搜索工具..."
+          :placeholder="t('pages.tools.searchPlaceholder')"
           size="small"
           clearable
           style="width: 200px;"
@@ -104,7 +106,7 @@ onMounted(fetchTools)
         </NInput>
         <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="fetchTools">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          刷新
+          {{ t('common.refresh') }}
         </NButton>
       </NSpace>
     </template>

@@ -39,6 +39,7 @@ import {
   CreateOutline,
   SearchOutline,
 } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useCronStore } from '@/stores/cron'
 import { useConfigStore } from '@/stores/config'
 import { useModelStore } from '@/stores/model'
@@ -83,6 +84,7 @@ const modelStore = useModelStore()
 const sessionStore = useSessionStore()
 const router = useRouter()
 const message = useMessage()
+const { t, locale } = useI18n()
 
 const showModal = ref(false)
 const modalMode = ref<'create' | 'edit'>('create')
@@ -90,54 +92,54 @@ const editingJobId = ref('')
 const searchQuery = ref('')
 const statusFilter = ref<StatusFilter>('all')
 
-const quickTemplatePresets: CronTemplatePreset[] = [
+const quickTemplatePresets = computed<CronTemplatePreset[]>(() => [
   {
     id: 'morning-report',
-    label: '每日晨报',
-    description: '每天早上固定时段汇总信息并推送',
+    label: t('pages.cron.templates.morningReport.label'),
+    description: t('pages.cron.templates.morningReport.description'),
     scheduleKind: 'cron',
     cronExpr: '0 8 * * *',
-    payloadText: '请汇总今天的重要动态，输出可直接阅读的晨报摘要。',
+    payloadText: t('pages.cron.templates.morningReport.payloadText'),
     payloadKind: 'agentTurn',
     sessionTarget: 'isolated',
     deliveryMode: 'announce',
   },
   {
     id: 'heartbeat-check',
-    label: '健康巡检',
-    description: '定时执行运行状态检查',
+    label: t('pages.cron.templates.heartbeatCheck.label'),
+    description: t('pages.cron.templates.heartbeatCheck.description'),
     scheduleKind: 'every',
     everyValue: 30,
     everyUnit: 'minutes',
-    payloadText: '检查服务运行状态，若异常请给出简要原因和建议。',
+    payloadText: t('pages.cron.templates.heartbeatCheck.payloadText'),
     payloadKind: 'agentTurn',
     sessionTarget: 'isolated',
     deliveryMode: 'announce',
   },
   {
     id: 'main-reminder',
-    label: '主会话提醒',
-    description: '在主会话推送系统提醒',
+    label: t('pages.cron.templates.mainReminder.label'),
+    description: t('pages.cron.templates.mainReminder.description'),
     scheduleKind: 'cron',
     cronExpr: '0 21 * * *',
-    payloadText: '提醒：请检查今日待办并同步完成进度。',
+    payloadText: t('pages.cron.templates.mainReminder.payloadText'),
     payloadKind: 'systemEvent',
     sessionTarget: 'main',
     deliveryMode: 'none',
   },
-]
+])
 
-const scheduleKindOptions: Array<{ label: string; value: ScheduleKind }> = [
-  { label: 'Cron 表达式', value: 'cron' },
-  { label: '固定间隔', value: 'every' },
-  { label: '指定时间', value: 'at' },
-]
+const scheduleKindOptions = computed<Array<{ label: string; value: ScheduleKind }>>(() => [
+  { label: t('pages.cron.scheduleKinds.cron'), value: 'cron' },
+  { label: t('pages.cron.scheduleKinds.every'), value: 'every' },
+  { label: t('pages.cron.scheduleKinds.at'), value: 'at' },
+])
 
-const everyUnitOptions: Array<{ label: string; value: EveryUnit }> = [
-  { label: '分钟', value: 'minutes' },
-  { label: '小时', value: 'hours' },
-  { label: '天', value: 'days' },
-]
+const everyUnitOptions = computed<Array<{ label: string; value: EveryUnit }>>(() => [
+  { label: t('pages.cron.units.minutes'), value: 'minutes' },
+  { label: t('pages.cron.units.hours'), value: 'hours' },
+  { label: t('pages.cron.units.days'), value: 'days' },
+])
 
 const deliveryChannelLabelMap: Record<string, string> = {
   whatsapp: 'WhatsApp',
@@ -149,10 +151,6 @@ const deliveryChannelLabelMap: Record<string, string> = {
   imessage: 'iMessage',
   qqbot: 'QQ Bot',
   qq: 'QQ',
-  wecom: '企业微信',
-  wechat: '微信',
-  dingtalk: '钉钉',
-  feishu: '飞书',
 }
 
 const form = reactive({
@@ -225,7 +223,9 @@ const selectedJobModelText = computed(() => {
   if (!payload || payload.kind !== 'agentTurn') return '-'
   const overrideModel = payload.model?.trim() || ''
   if (overrideModel) return overrideModel
-  return defaultModelRef.value ? `默认（${defaultModelRef.value}）` : '默认模型（未配置）'
+  return defaultModelRef.value
+    ? t('pages.cron.defaultModel', { model: defaultModelRef.value })
+    : t('pages.cron.defaultModelNotConfigured')
 })
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -255,6 +255,13 @@ function isConfiguredChannelEnabled(value: unknown): boolean {
 
 function formatDeliveryChannelLabel(channelKey: string): string {
   const normalized = normalizeChannelKey(channelKey)
+  if (normalized === 'last') return t('pages.cron.delivery.last')
+  if (normalized === 'qqbot') return t('pages.cron.delivery.channels.qqbot')
+  if (normalized === 'qq') return t('pages.cron.delivery.channels.qq')
+  if (normalized === 'wecom') return t('pages.cron.delivery.channels.wecom')
+  if (normalized === 'wechat') return t('pages.cron.delivery.channels.wechat')
+  if (normalized === 'dingtalk') return t('pages.cron.delivery.channels.dingtalk')
+  if (normalized === 'feishu') return t('pages.cron.delivery.channels.feishu')
   return deliveryChannelLabelMap[normalized] || normalized
 }
 
@@ -301,7 +308,7 @@ const configuredChannelConfigMap = computed<Record<string, unknown>>(() => {
 })
 
 const deliveryChannelOptions = computed<SelectOption[]>(() => {
-  const options: SelectOption[] = [{ label: 'last（沿用最近回复渠道）', value: 'last' }]
+  const options: SelectOption[] = [{ label: t('pages.cron.delivery.last'), value: 'last' }]
   const seen = new Set<string>(['last'])
   const channels = configuredChannelConfigMap.value
   if (channels) {
@@ -326,7 +333,7 @@ const deliveryChannelOptions = computed<SelectOption[]>(() => {
   const currentKey = normalizeChannelKey(currentValue)
   if (currentValue && !seen.has(currentKey)) {
     options.push({
-      label: `${formatDeliveryChannelLabel(currentValue)}（当前值）`,
+      label: t('common.currentValueSuffix', { label: formatDeliveryChannelLabel(currentValue) }),
       value: currentValue,
     })
   }
@@ -383,7 +390,7 @@ const deliveryTargetOptions = computed<SelectOption[]>(() => {
   const current = form.deliveryTo.trim()
   if (current && !targetSet.has(current)) {
     options.unshift({
-      label: `${current}（当前值）`,
+      label: t('common.currentValueSuffix', { label: current }),
       value: current,
     })
   }
@@ -513,7 +520,7 @@ const modelSelectOptions = computed<SelectOption[]>(() => {
   const current = form.model.trim()
   if (current && !options.some((option) => option.value === current)) {
     options.unshift({
-      label: `${current}（当前值）`,
+      label: t('common.currentValueSuffix', { label: current }),
       value: current,
     })
   }
@@ -556,13 +563,13 @@ const previewPayload = computed(() => {
     return JSON.stringify(payload, null, 2)
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    return `// 预览暂不可用：${msg}`
+    return t('pages.cron.previewUnavailable', { error: msg })
   }
 })
 
-const jobColumns: DataTableColumns<CronJob> = [
+const jobColumns = computed<DataTableColumns<CronJob>>(() => [
   {
-    title: '任务',
+    title: t('pages.cron.table.jobs.task'),
     key: 'name',
     minWidth: 192,
     render(row) {
@@ -576,14 +583,14 @@ const jobColumns: DataTableColumns<CronJob> = [
           ? h(
               NTag,
               { size: 'tiny', bordered: false, type: 'success' },
-              { default: () => '已选中' }
+              { default: () => t('pages.cron.table.jobs.selected') }
             )
           : null,
       ])
     },
   },
   {
-    title: '调度',
+    title: t('pages.cron.table.jobs.schedule'),
     key: 'schedule',
     minWidth: 176,
     render(row) {
@@ -597,14 +604,14 @@ const jobColumns: DataTableColumns<CronJob> = [
               ? h(
                   NTag,
                   { size: 'tiny', bordered: false, type: row.sessionTarget === 'isolated' ? 'info' : 'default', round: true },
-                  { default: () => row.sessionTarget === 'isolated' ? '隔离会话' : '主会话' }
+                  { default: () => row.sessionTarget === 'isolated' ? t('pages.cron.sessionTargets.isolated') : t('pages.cron.sessionTargets.main') }
                 )
               : null,
             row.payload
               ? h(
                   NTag,
                   { size: 'tiny', bordered: false, type: row.payload.kind === 'agentTurn' ? 'success' : 'warning', round: true },
-                  { default: () => row.payload?.kind === 'agentTurn' ? 'Agent 执行' : '系统事件' }
+                  { default: () => row.payload?.kind === 'agentTurn' ? t('pages.cron.payloadKinds.agentTurn') : t('pages.cron.payloadKinds.systemEvent') }
                 )
               : null,
           ].filter(Boolean)
@@ -613,7 +620,7 @@ const jobColumns: DataTableColumns<CronJob> = [
     },
   },
   {
-    title: '下次执行',
+    title: t('pages.cron.table.jobs.nextRun'),
     key: 'next',
     width: 126,
     render(row) {
@@ -621,7 +628,7 @@ const jobColumns: DataTableColumns<CronJob> = [
     },
   },
   {
-    title: '状态',
+    title: t('pages.cron.table.jobs.status'),
     key: 'enabled',
     width: 92,
     render(row) {
@@ -636,7 +643,7 @@ const jobColumns: DataTableColumns<CronJob> = [
     },
   },
   {
-    title: '操作',
+    title: t('pages.cron.table.jobs.actions'),
     key: 'actions',
     width: 178,
     render(row) {
@@ -653,7 +660,7 @@ const jobColumns: DataTableColumns<CronJob> = [
           },
           {
             icon: () => h(NIcon, { component: PlayOutline }),
-            default: () => '运行',
+            default: () => t('pages.cron.actions.run'),
           }
         ),
         h(
@@ -668,15 +675,15 @@ const jobColumns: DataTableColumns<CronJob> = [
           },
           {
             icon: () => h(NIcon, { component: CreateOutline }),
-            default: () => '编辑',
+            default: () => t('pages.cron.actions.edit'),
           }
         ),
         h(
           NPopconfirm,
           {
             onPositiveClick: () => handleDelete(row),
-            positiveText: '删除',
-            negativeText: '取消',
+            positiveText: t('common.delete'),
+            negativeText: t('common.cancel'),
           },
           {
             trigger: () =>
@@ -690,20 +697,20 @@ const jobColumns: DataTableColumns<CronJob> = [
                 },
                 {
                   icon: () => h(NIcon, { component: TrashOutline }),
-                  default: () => '删除',
+                  default: () => t('common.delete'),
                 }
               ),
-            default: () => '确认删除该定时任务？',
+            default: () => t('pages.cron.confirmDeleteJob'),
           }
         ),
       ])
     },
   },
-]
+])
 
-const runColumns: DataTableColumns<CronRunLogEntry> = [
+const runColumns = computed<DataTableColumns<CronRunLogEntry>>(() => [
   {
-    title: '执行时间',
+    title: t('pages.cron.table.runs.runAt'),
     key: 'ts',
     width: 170,
     render(row) {
@@ -711,7 +718,7 @@ const runColumns: DataTableColumns<CronRunLogEntry> = [
     },
   },
   {
-    title: '状态',
+    title: t('pages.cron.table.runs.status'),
     key: 'status',
     width: 100,
     render(row) {
@@ -728,7 +735,7 @@ const runColumns: DataTableColumns<CronRunLogEntry> = [
     },
   },
   {
-    title: '耗时',
+    title: t('pages.cron.table.runs.duration'),
     key: 'durationMs',
     width: 90,
     render(row) {
@@ -737,7 +744,7 @@ const runColumns: DataTableColumns<CronRunLogEntry> = [
     },
   },
   {
-    title: '摘要',
+    title: t('pages.cron.table.runs.summary'),
     key: 'summary',
     minWidth: 260,
     render(row) {
@@ -745,7 +752,7 @@ const runColumns: DataTableColumns<CronRunLogEntry> = [
     },
   },
   {
-    title: '会话',
+    title: t('pages.cron.table.runs.session'),
     key: 'sessionKey',
     width: 100,
     render(row) {
@@ -757,11 +764,11 @@ const runColumns: DataTableColumns<CronRunLogEntry> = [
           type: 'primary',
           onClick: () => openRunSession(row),
         },
-        { default: () => '打开' }
+        { default: () => t('pages.cron.actions.openSession') }
       )
     },
   },
-]
+])
 
 onMounted(async () => {
   await Promise.all([
@@ -777,9 +784,8 @@ onMounted(async () => {
 })
 
 function formatModelOptionLabel(model: ModelInfo): string {
-  const base = model.label && model.label !== model.id
-    ? `${model.label}（${model.id}）`
-    : model.id
+  const suffix = locale.value === 'zh-CN' ? `（${model.id}）` : ` (${model.id})`
+  const base = model.label && model.label !== model.id ? `${model.label}${suffix}` : model.id
   if (!model.provider) return base
   return `${base} · ${model.provider}`
 }
@@ -965,7 +971,7 @@ function resolveEveryForm(everyMs: number): { value: number; unit: EveryUnit } {
 function buildSchedule(): CronSchedule {
   if (form.scheduleKind === 'cron') {
     const expr = form.cronExpr.trim()
-    if (!expr) throw new Error('请输入 Cron 表达式')
+    if (!expr) throw new Error(t('pages.cron.validation.cronExprRequired'))
     return {
       kind: 'cron',
       expr,
@@ -976,7 +982,7 @@ function buildSchedule(): CronSchedule {
   if (form.scheduleKind === 'every') {
     const amount = Number(form.everyValue)
     if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error('间隔数值必须大于 0')
+      throw new Error(t('pages.cron.validation.everyValueInvalid'))
     }
     const multiplier =
       form.everyUnit === 'days'
@@ -992,7 +998,7 @@ function buildSchedule(): CronSchedule {
 
   const atMs = Date.parse(form.atTime)
   if (!form.atTime || !Number.isFinite(atMs)) {
-    throw new Error('请选择有效的执行时间')
+    throw new Error(t('pages.cron.validation.atTimeRequired'))
   }
   return {
     kind: 'at',
@@ -1002,7 +1008,7 @@ function buildSchedule(): CronSchedule {
 
 function buildPayload(): CronPayload {
   const text = form.payloadText.trim()
-  if (!text) throw new Error('请输入执行内容')
+  if (!text) throw new Error(t('pages.cron.validation.payloadRequired'))
 
   if (form.sessionTarget === 'main' || form.payloadKind === 'systemEvent') {
     return {
@@ -1038,7 +1044,7 @@ function buildDelivery(): CronDelivery | undefined {
 
 function buildSubmitPayload(): CronUpsertParams {
   const name = form.name.trim()
-  if (!name) throw new Error('请输入任务名称')
+  if (!name) throw new Error(t('pages.cron.validation.nameRequired'))
 
   const payload: CronUpsertParams = {
     name,
@@ -1158,21 +1164,121 @@ function formatCronAsCn(expr: string, tz?: string): string {
   return `${compactExpr}${tzSuffix}`
 }
 
+function formatCronAsEn(expr: string, tz?: string): string {
+  const compactExpr = expr.trim().replace(/\s+/g, ' ')
+  const parts = compactExpr.split(' ')
+  const tzSuffix = tz ? ` (${tz})` : ''
+  if (parts.length !== 5) return `${compactExpr}${tzSuffix}`
+
+  const minute = parts[0] ?? ''
+  const hour = parts[1] ?? ''
+  const dayOfMonth = parts[2] ?? ''
+  const month = parts[3] ?? ''
+  const dayOfWeek = parts[4] ?? ''
+  const isNumber = (value: string) => /^\d+$/.test(value)
+  const asNum = (value: string) => (isNumber(value) ? Number(value) : NaN)
+  const pad2 = (value: number) => String(value).padStart(2, '0')
+
+  if (/^\*\/\d+$/.test(minute) && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return t('pages.cron.schedule.every', {
+      value: Number(minute.slice(2)),
+      unit: t('pages.cron.units.minutes'),
+    }) + tzSuffix
+  }
+
+  if (minute === '0' && /^\*\/\d+$/.test(hour) && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return t('pages.cron.schedule.every', {
+      value: Number(hour.slice(2)),
+      unit: t('pages.cron.units.hours'),
+    }) + tzSuffix
+  }
+
+  if (isNumber(minute) && /^\*\/\d+$/.test(hour) && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return t('pages.cron.schedule.everyHoursAtMinute', {
+      value: Number(hour.slice(2)),
+      minute: pad2(asNum(minute)),
+    }) + tzSuffix
+  }
+
+  const weekdayMap: Record<string, string> = {
+    '0': 'Sun',
+    '7': 'Sun',
+    '1': 'Mon',
+    '2': 'Tue',
+    '3': 'Wed',
+    '4': 'Thu',
+    '5': 'Fri',
+    '6': 'Sat',
+    SUN: 'Sun',
+    MON: 'Mon',
+    TUE: 'Tue',
+    WED: 'Wed',
+    THU: 'Thu',
+    FRI: 'Fri',
+    SAT: 'Sat',
+  }
+  const normalizeDow = (value: string) => weekdayMap[value.toUpperCase()] || null
+  const parseDowPart = (value: string): string | null => {
+    if (value.includes('-')) {
+      const [start, end] = value.split('-')
+      const startText = start ? normalizeDow(start) : null
+      const endText = end ? normalizeDow(end) : null
+      return startText && endText ? `${startText}-${endText}` : null
+    }
+    return normalizeDow(value)
+  }
+  const parseDow = (value: string): string | null => {
+    if (value === '*') return null
+    const partsText = value.split(',').map((item) => parseDowPart(item.trim())).filter(Boolean) as string[]
+    if (!partsText.length) return null
+    return partsText.join(', ')
+  }
+
+  if (isNumber(minute) && isNumber(hour)) {
+    const timeText = `${pad2(asNum(hour))}:${pad2(asNum(minute))}`
+    if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+      return t('pages.cron.schedule.dailyAt', { time: timeText }) + tzSuffix
+    }
+    const weekText = parseDow(dayOfWeek)
+    if (dayOfMonth === '*' && month === '*' && weekText) {
+      return t('pages.cron.schedule.weeklyAt', { weekdays: weekText, time: timeText }) + tzSuffix
+    }
+    if (isNumber(dayOfMonth) && month === '*' && dayOfWeek === '*') {
+      return t('pages.cron.schedule.monthlyAt', { day: asNum(dayOfMonth), time: timeText }) + tzSuffix
+    }
+    if (isNumber(dayOfMonth) && isNumber(month) && dayOfWeek === '*') {
+      return t('pages.cron.schedule.yearlyAt', { month: asNum(month), day: asNum(dayOfMonth), time: timeText }) + tzSuffix
+    }
+  }
+
+  return `${compactExpr}${tzSuffix}`
+}
+
 function resolveScheduleText(job: CronJob): string {
   if (job.scheduleObj?.kind === 'cron') {
-    return formatCronAsCn(job.scheduleObj.expr, job.scheduleObj.tz)
+    return locale.value === 'zh-CN'
+      ? formatCronAsCn(job.scheduleObj.expr, job.scheduleObj.tz)
+      : formatCronAsEn(job.scheduleObj.expr, job.scheduleObj.tz)
   }
   if (job.scheduleObj?.kind === 'every') {
     const every = resolveEveryForm(job.scheduleObj.everyMs)
-    const unitText = every.unit === 'minutes' ? '分钟' : every.unit === 'hours' ? '小时' : '天'
-    return `每 ${every.value} ${unitText}`
+    const unitText =
+      every.unit === 'minutes'
+        ? t('pages.cron.units.minutes')
+        : every.unit === 'hours'
+          ? t('pages.cron.units.hours')
+          : t('pages.cron.units.days')
+    return t('pages.cron.schedule.every', { value: every.value, unit: unitText })
   }
   if (job.scheduleObj?.kind === 'at') {
-    return `at ${formatDate(job.scheduleObj.at)}`
+    return t('pages.cron.schedule.at', { time: formatDate(job.scheduleObj.at) })
   }
   if (job.schedule) {
     const schedule = parseCronSource(job.schedule)
-    return formatCronAsCn(schedule.expr, schedule.tz || job.timezone)
+    const tz = schedule.tz || job.timezone
+    return locale.value === 'zh-CN'
+      ? formatCronAsCn(schedule.expr, tz)
+      : formatCronAsEn(schedule.expr, tz)
   }
   return '-'
 }
@@ -1216,27 +1322,27 @@ async function handleSelectJob(row: CronJob) {
 async function handleToggle(job: CronJob, value: boolean) {
   try {
     await cronStore.updateJob(job.id, { enabled: value })
-    message.success(value ? '任务已启用' : '任务已禁用')
+    message.success(value ? t('pages.cron.messages.jobEnabled') : t('pages.cron.messages.jobDisabled'))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '更新失败')
+    message.error(error instanceof Error ? error.message : t('pages.cron.messages.updateFailed'))
   }
 }
 
 async function handleRun(job: CronJob) {
   try {
     await cronStore.runJob(job.id, 'force')
-    message.success('任务已触发执行')
+    message.success(t('pages.cron.messages.jobTriggered'))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '触发执行失败')
+    message.error(error instanceof Error ? error.message : t('pages.cron.messages.triggerFailed'))
   }
 }
 
 async function handleDelete(job: CronJob) {
   try {
     await cronStore.deleteJob(job.id)
-    message.success('任务已删除')
+    message.success(t('pages.cron.messages.jobDeleted'))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '删除失败')
+    message.error(error instanceof Error ? error.message : t('pages.cron.messages.deleteFailed'))
   }
 }
 
@@ -1245,17 +1351,17 @@ async function handleSubmit() {
     const payload = buildSubmitPayload()
     if (isEditing.value && editingJobId.value) {
       await cronStore.updateJob(editingJobId.value, payload)
-      message.success('任务已更新')
+      message.success(t('pages.cron.messages.jobUpdated'))
       if (editingJobId.value) {
         await cronStore.fetchRuns(editingJobId.value)
       }
     } else {
       await cronStore.createJob(payload)
-      message.success('任务已创建')
+      message.success(t('pages.cron.messages.jobCreated'))
     }
     showModal.value = false
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '保存失败')
+    message.error(error instanceof Error ? error.message : t('common.saveFailed'))
   }
 }
 
@@ -1285,35 +1391,35 @@ function jobRowProps(row: CronJob) {
   <div class="cron-page">
     <NCard class="cron-hero" :bordered="false">
       <template #header>
-        <div class="cron-hero-title">Cron 管理（调度中心）</div>
+        <div class="cron-hero-title">{{ t('pages.cron.title') }}</div>
       </template>
       <template #header-extra>
         <NSpace :size="8">
           <NButton size="small" :loading="cronStore.loading || cronStore.statusLoading" @click="handleRefresh">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新
+            {{ t('common.refresh') }}
           </NButton>
           <NButton size="small" type="primary" @click="openCreateModal">
             <template #icon><NIcon :component="AddOutline" /></template>
-            新建任务
+            {{ t('pages.cron.actions.createJob') }}
           </NButton>
         </NSpace>
       </template>
 
       <NSpace vertical :size="10">
         <NAlert type="info" :show-icon="true" :bordered="false">
-          重复任务建议使用 Cron/Every，一次性触发使用 At；先用模板起步，再按业务调整细节。
+          {{ t('pages.cron.tips') }}
         </NAlert>
         <NAlert v-if="!stats.schedulerEnabled" type="warning" :show-icon="true" :bordered="false">
-          当前网关 `cron.enabled` 可能已关闭，任务不会自动调度执行。
+          {{ t('pages.cron.schedulerDisabledHint') }}
         </NAlert>
         <NAlert v-if="cronStore.lastError" type="error" :show-icon="true" :bordered="false">
-          Cron 请求失败：{{ cronStore.lastError }}
+          {{ t('pages.cron.requestFailed', { error: cronStore.lastError }) }}
         </NAlert>
       </NSpace>
 
       <div class="cron-template-row">
-        <NText depth="3">快捷模板</NText>
+        <NText depth="3">{{ t('pages.cron.quickTemplates') }}</NText>
         <NSpace :size="8" wrap>
           <NButton
             v-for="preset in quickTemplatePresets"
@@ -1332,16 +1438,18 @@ function jobRowProps(row: CronJob) {
         <NGridItem>
           <NCard embedded :bordered="false" class="cron-stat-card">
             <NSpace align="center" justify="space-between">
-              <NText depth="3">调度器</NText>
+              <NText depth="3">{{ t('pages.cron.stats.scheduler') }}</NText>
               <NIcon :component="CalendarOutline" />
             </NSpace>
-            <div class="cron-stat-value">{{ stats.schedulerEnabled ? '已启用' : '已关闭' }}</div>
+            <div class="cron-stat-value">
+              {{ stats.schedulerEnabled ? t('pages.cron.stats.schedulerEnabled') : t('pages.cron.stats.schedulerDisabled') }}
+            </div>
           </NCard>
         </NGridItem>
         <NGridItem>
           <NCard embedded :bordered="false" class="cron-stat-card">
             <NSpace align="center" justify="space-between">
-              <NText depth="3">任务总数</NText>
+              <NText depth="3">{{ t('pages.cron.stats.totalJobs') }}</NText>
               <NIcon :component="TimeOutline" />
             </NSpace>
             <div class="cron-stat-value">{{ stats.total }}</div>
@@ -1350,7 +1458,7 @@ function jobRowProps(row: CronJob) {
         <NGridItem>
           <NCard embedded :bordered="false" class="cron-stat-card">
             <NSpace align="center" justify="space-between">
-              <NText depth="3">启用任务</NText>
+              <NText depth="3">{{ t('pages.cron.stats.enabledJobs') }}</NText>
               <NIcon :component="CheckmarkCircleOutline" />
             </NSpace>
             <div class="cron-stat-value">{{ stats.enabled }}</div>
@@ -1359,7 +1467,7 @@ function jobRowProps(row: CronJob) {
         <NGridItem>
           <NCard embedded :bordered="false" class="cron-stat-card">
             <NSpace align="center" justify="space-between">
-              <NText depth="3">禁用任务</NText>
+              <NText depth="3">{{ t('pages.cron.stats.disabledJobs') }}</NText>
               <NIcon :component="PauseCircleOutline" />
             </NSpace>
             <div class="cron-stat-value">{{ stats.disabled }}</div>
@@ -1367,7 +1475,7 @@ function jobRowProps(row: CronJob) {
         </NGridItem>
         <NGridItem>
           <NCard embedded :bordered="false" class="cron-stat-card">
-            <NText depth="3">下次唤醒</NText>
+            <NText depth="3">{{ t('pages.cron.stats.nextWake') }}</NText>
             <div class="cron-stat-subvalue">{{ stats.nextWakeText }}</div>
           </NCard>
         </NGridItem>
@@ -1379,21 +1487,23 @@ function jobRowProps(row: CronJob) {
         <NCard class="cron-card" :bordered="false">
           <template #header>
             <NSpace justify="space-between" align="center">
-              <NText strong>任务列表</NText>
-              <NText depth="3" style="font-size: 12px;">{{ filteredJobs.length }} 条</NText>
+              <NText strong>{{ t('pages.cron.jobs.title') }}</NText>
+              <NText depth="3" style="font-size: 12px;">
+                {{ t('pages.cron.jobs.count', { count: filteredJobs.length }) }}
+              </NText>
             </NSpace>
           </template>
 
           <div class="cron-filter-row">
-            <NInput v-model:value="searchQuery" clearable placeholder="搜索名称 / 描述 / 负载内容">
+            <NInput v-model:value="searchQuery" clearable :placeholder="t('pages.cron.jobs.searchPlaceholder')">
               <template #prefix><NIcon :component="SearchOutline" /></template>
             </NInput>
             <NRadioGroup v-model:value="statusFilter" size="small">
-              <NRadioButton value="all">全部</NRadioButton>
-              <NRadioButton value="enabled">启用</NRadioButton>
-              <NRadioButton value="disabled">禁用</NRadioButton>
+              <NRadioButton value="all">{{ t('common.all') }}</NRadioButton>
+              <NRadioButton value="enabled">{{ t('common.enabled') }}</NRadioButton>
+              <NRadioButton value="disabled">{{ t('common.disabled') }}</NRadioButton>
             </NRadioGroup>
-            <NButton size="small" @click="clearFilters">清空</NButton>
+            <NButton size="small" @click="clearFilters">{{ t('common.clear') }}</NButton>
           </div>
 
           <NDataTable
@@ -1410,7 +1520,7 @@ function jobRowProps(row: CronJob) {
           />
 
           <NAlert v-if="!cronStore.loading && !hasJobs" type="default" :bordered="false" class="cron-empty-alert">
-            还没有任务。可直接使用上方“快捷模板”或点击“新建任务”。
+            {{ t('pages.cron.jobs.emptyHint') }}
           </NAlert>
         </NCard>
       </NGridItem>
@@ -1422,7 +1532,7 @@ function jobRowProps(row: CronJob) {
               <NText strong>{{ selectedJob.name }}</NText>
               <NSpace :size="6">
                 <NTag :type="selectedJob.enabled ? 'success' : 'default'" size="small" :bordered="false" round>
-                  {{ selectedJob.enabled ? '启用中' : '已禁用' }}
+                  {{ selectedJob.enabled ? t('pages.cron.jobStatus.enabled') : t('pages.cron.jobStatus.disabled') }}
                 </NTag>
                 <NTag v-if="selectedJob.state?.lastStatus" size="small" :bordered="false" round>
                   {{ selectedJob.state?.lastStatus }}
@@ -1430,42 +1540,42 @@ function jobRowProps(row: CronJob) {
               </NSpace>
             </NSpace>
 
-            <NText depth="3" class="cron-detail-desc">{{ selectedJob.description || '暂无描述' }}</NText>
+            <NText depth="3" class="cron-detail-desc">{{ selectedJob.description || t('common.noDescription') }}</NText>
 
             <NGrid cols="1 s:2" responsive="screen" :x-gap="10" :y-gap="10" class="cron-detail-grid">
               <NGridItem>
-                <NText depth="3">调度</NText>
+                <NText depth="3">{{ t('pages.cron.detail.schedule') }}</NText>
                 <div class="cron-detail-value">{{ resolveScheduleText(selectedJob) }}</div>
               </NGridItem>
               <NGridItem>
-                <NText depth="3">执行模式</NText>
+                <NText depth="3">{{ t('pages.cron.detail.execMode') }}</NText>
                 <div class="cron-detail-value">{{ selectedJob.sessionTarget || '-' }} / {{ selectedJob.wakeMode || '-' }}</div>
               </NGridItem>
               <NGridItem>
-                <NText depth="3">负载类型</NText>
+                <NText depth="3">{{ t('pages.cron.detail.payloadKind') }}</NText>
                 <div class="cron-detail-value">{{ selectedJob.payload?.kind || '-' }}</div>
               </NGridItem>
               <NGridItem>
-                <NText depth="3">模型</NText>
+                <NText depth="3">{{ t('pages.cron.detail.model') }}</NText>
                 <div class="cron-detail-value">{{ selectedJobModelText }}</div>
               </NGridItem>
               <NGridItem>
-                <NText depth="3">Agent</NText>
-                <div class="cron-detail-value">{{ selectedJob.agentId || '默认 Agent' }}</div>
+                <NText depth="3">{{ t('pages.cron.detail.agent') }}</NText>
+                <div class="cron-detail-value">{{ selectedJob.agentId || t('pages.cron.defaultAgent') }}</div>
               </NGridItem>
               <NGridItem>
-                <NText depth="3">下次执行</NText>
+                <NText depth="3">{{ t('pages.cron.detail.nextRun') }}</NText>
                 <div class="cron-detail-value">{{ nextRunText(selectedJob) }}</div>
               </NGridItem>
               <NGridItem>
-                <NText depth="3">上次执行</NText>
+                <NText depth="3">{{ t('pages.cron.detail.lastRun') }}</NText>
                 <div class="cron-detail-value">{{ lastRunText(selectedJob) }}</div>
               </NGridItem>
             </NGrid>
 
             <NDivider style="margin: 14px 0 10px;" />
 
-            <NText depth="3">执行内容</NText>
+            <NText depth="3">{{ t('pages.cron.detail.payload') }}</NText>
             <div
               v-if="selectedJobPayloadHtml"
               class="cron-detail-value cron-detail-block cron-markdown"
@@ -1474,7 +1584,7 @@ function jobRowProps(row: CronJob) {
             <div v-else class="cron-detail-value cron-detail-block">-</div>
 
             <div v-if="selectedJob.delivery" class="cron-delivery-block">
-              <NText depth="3">投递策略</NText>
+              <NText depth="3">{{ t('pages.cron.detail.delivery') }}</NText>
               <div class="cron-detail-value cron-detail-block">
                 {{ selectedJob.delivery.mode }}
                 <span v-if="selectedJob.delivery.channel"> / {{ selectedJob.delivery.channel }}</span>
@@ -1489,27 +1599,27 @@ function jobRowProps(row: CronJob) {
               :bordered="false"
               class="cron-error-alert"
             >
-              最近错误：{{ selectedJob.state?.lastError }}
+              {{ t('pages.cron.detail.lastError', { error: selectedJob.state?.lastError }) }}
             </NAlert>
 
             <NSpace class="cron-detail-actions" wrap>
               <NButton size="small" type="primary" @click="handleRun(selectedJob)">
                 <template #icon><NIcon :component="PlayOutline" /></template>
-                立即运行
+                {{ t('pages.cron.actions.runNow') }}
               </NButton>
               <NButton size="small" @click="openEditModal(selectedJob)">
                 <template #icon><NIcon :component="CreateOutline" /></template>
-                编辑任务
+                {{ t('pages.cron.actions.editJob') }}
               </NButton>
               <NButton size="small" @click="cronStore.fetchRuns(selectedJob.id)">
                 <template #icon><NIcon :component="RefreshOutline" /></template>
-                刷新历史
+                {{ t('pages.cron.actions.refreshRuns') }}
               </NButton>
             </NSpace>
           </template>
 
           <div v-else class="cron-empty-state">
-            从左侧选择任务后，可查看调度详情、最近状态和运行历史。
+            {{ t('pages.cron.detail.emptyHint') }}
           </div>
         </NCard>
       </NGridItem>
@@ -1518,9 +1628,11 @@ function jobRowProps(row: CronJob) {
     <NCard class="cron-card" :bordered="false">
       <template #header>
         <NSpace justify="space-between" align="center">
-          <NText strong>运行历史</NText>
+          <NText strong>{{ t('pages.cron.runs.title') }}</NText>
           <NText depth="3" style="font-size: 12px;">
-            {{ selectedJob ? `${selectedJob.name}（最近 ${orderedRuns.length} 条）` : '未选择任务' }}
+            {{ selectedJob
+              ? t('pages.cron.runs.subtitle', { name: selectedJob.name, count: orderedRuns.length })
+              : t('pages.cron.runs.noSelection') }}
           </NText>
         </NSpace>
       </template>
@@ -1539,58 +1651,58 @@ function jobRowProps(row: CronJob) {
     <NModal
       v-model:show="showModal"
       preset="card"
-      :title="isEditing ? '编辑任务' : '新建任务'"
+      :title="isEditing ? t('pages.cron.modal.editTitle') : t('pages.cron.modal.createTitle')"
       style="width: 860px; max-width: calc(100vw - 32px);"
     >
       <NForm label-placement="left" label-width="110">
-        <NDivider title-placement="left">基础信息</NDivider>
+        <NDivider title-placement="left">{{ t('pages.cron.modal.sections.basic') }}</NDivider>
         <NGrid cols="1 s:2" responsive="screen" :x-gap="10">
           <NGridItem>
-            <NFormItem label="任务名称" required>
-              <NInput v-model:value="form.name" placeholder="例如：每日晨报" />
+            <NFormItem :label="t('pages.cron.form.name')" required>
+              <NInput v-model:value="form.name" :placeholder="t('pages.cron.form.namePlaceholder')" />
             </NFormItem>
           </NGridItem>
           <NGridItem>
-            <NFormItem label="Agent ID">
-              <NInput v-model:value="form.agentId" placeholder="为空则使用默认 Agent" />
+            <NFormItem :label="t('pages.cron.form.agentId')">
+              <NInput v-model:value="form.agentId" :placeholder="t('pages.cron.form.agentIdPlaceholder')" />
             </NFormItem>
           </NGridItem>
         </NGrid>
-        <NFormItem label="任务描述">
+        <NFormItem :label="t('pages.cron.form.description')">
           <NInput
             v-model:value="form.description"
             type="textarea"
             :autosize="{ minRows: 2, maxRows: 4 }"
-            placeholder="简要说明任务目的（可选）"
+            :placeholder="t('pages.cron.form.descriptionPlaceholder')"
           />
         </NFormItem>
         <NGrid cols="1 s:2" responsive="screen" :x-gap="10">
           <NGridItem>
-            <NFormItem label="启用任务">
+            <NFormItem :label="t('pages.cron.form.enabled')">
               <NSwitch v-model:value="form.enabled" />
             </NFormItem>
           </NGridItem>
           <NGridItem>
-            <NFormItem label="完成后删除">
+            <NFormItem :label="t('pages.cron.form.deleteAfterRun')">
               <NSwitch v-model:value="form.deleteAfterRun" />
             </NFormItem>
           </NGridItem>
         </NGrid>
 
-        <NDivider title-placement="left">调度策略</NDivider>
-        <NFormItem label="调度方式">
+        <NDivider title-placement="left">{{ t('pages.cron.modal.sections.schedule') }}</NDivider>
+        <NFormItem :label="t('pages.cron.form.scheduleKind')">
           <NSelect v-model:value="form.scheduleKind" :options="scheduleKindOptions" />
         </NFormItem>
         <template v-if="form.scheduleKind === 'cron'">
           <NGrid cols="1 s:2" responsive="screen" :x-gap="10">
             <NGridItem>
-              <NFormItem label="Cron 表达式" required>
-                <NInput v-model:value="form.cronExpr" placeholder="例如：0 7 * * *" />
+              <NFormItem :label="t('pages.cron.form.cronExpr')" required>
+                <NInput v-model:value="form.cronExpr" :placeholder="t('pages.cron.form.cronExprPlaceholder')" />
               </NFormItem>
             </NGridItem>
             <NGridItem>
-              <NFormItem label="时区">
-                <NInput v-model:value="form.cronTz" placeholder="例如：Asia/Shanghai（可选）" />
+              <NFormItem :label="t('pages.cron.form.timezone')">
+                <NInput v-model:value="form.cronTz" :placeholder="t('pages.cron.form.timezonePlaceholder')" />
               </NFormItem>
             </NGridItem>
           </NGrid>
@@ -1598,73 +1710,75 @@ function jobRowProps(row: CronJob) {
         <template v-else-if="form.scheduleKind === 'every'">
           <NGrid cols="1 s:2" responsive="screen" :x-gap="10">
             <NGridItem>
-              <NFormItem label="间隔数值" required>
+              <NFormItem :label="t('pages.cron.form.everyValue')" required>
                 <NInputNumber
                   v-model:value="form.everyValue"
                   :min="1"
                   :precision="0"
                   :show-button="false"
-                  placeholder="例如：2"
+                  :placeholder="t('pages.cron.form.everyValuePlaceholder')"
                   style="width: 100%;"
                 />
               </NFormItem>
             </NGridItem>
             <NGridItem>
-              <NFormItem label="间隔单位" required>
+              <NFormItem :label="t('pages.cron.form.everyUnit')" required>
                 <NSelect v-model:value="form.everyUnit" :options="everyUnitOptions" />
               </NFormItem>
             </NGridItem>
           </NGrid>
         </template>
         <template v-else>
-          <NFormItem label="执行时间" required>
+          <NFormItem :label="t('pages.cron.form.atTime')" required>
             <input v-model="form.atTime" class="cron-native-input" type="datetime-local" />
           </NFormItem>
         </template>
 
-        <NDivider title-placement="left">执行内容</NDivider>
+        <NDivider title-placement="left">{{ t('pages.cron.modal.sections.payload') }}</NDivider>
         <NGrid cols="1 s:3" responsive="screen" :x-gap="10">
           <NGridItem>
-            <NFormItem label="会话目标">
+            <NFormItem :label="t('pages.cron.form.sessionTarget')">
               <NSelect
                 v-model:value="form.sessionTarget"
                 :options="[
-                  { label: 'isolated（推荐）', value: 'isolated' },
-                  { label: 'main', value: 'main' },
+                  { label: t('pages.cron.form.sessionTargets.isolated'), value: 'isolated' },
+                  { label: t('pages.cron.form.sessionTargets.main'), value: 'main' },
                 ]"
               />
             </NFormItem>
           </NGridItem>
           <NGridItem>
-            <NFormItem label="唤醒模式">
+            <NFormItem :label="t('pages.cron.form.wakeMode')">
               <NSelect
                 v-model:value="form.wakeMode"
                 :options="[
-                  { label: 'next-heartbeat', value: 'next-heartbeat' },
-                  { label: 'now', value: 'now' },
+                  { label: t('pages.cron.form.wakeModes.nextHeartbeat'), value: 'next-heartbeat' },
+                  { label: t('pages.cron.form.wakeModes.now'), value: 'now' },
                 ]"
               />
             </NFormItem>
           </NGridItem>
           <NGridItem>
-            <NFormItem label="负载类型">
+            <NFormItem :label="t('pages.cron.form.payloadKind')">
               <NSelect
                 v-model:value="form.payloadKind"
                 :disabled="form.sessionTarget === 'main'"
                 :options="[
-                  { label: 'agentTurn', value: 'agentTurn' },
-                  { label: 'systemEvent', value: 'systemEvent' },
+                  { label: t('pages.cron.payloadKinds.agentTurn'), value: 'agentTurn' },
+                  { label: t('pages.cron.payloadKinds.systemEvent'), value: 'systemEvent' },
                 ]"
               />
             </NFormItem>
           </NGridItem>
         </NGrid>
-        <NFormItem label="执行文本" required>
+        <NFormItem :label="t('pages.cron.form.payloadText')" required>
           <NInput
             v-model:value="form.payloadText"
             type="textarea"
             :autosize="{ minRows: 3, maxRows: 6 }"
-            :placeholder="form.payloadKind === 'agentTurn' ? '输入给 Agent 的执行提示词' : '输入 system event 内容'"
+            :placeholder="form.payloadKind === 'agentTurn'
+              ? t('pages.cron.form.payloadTextPlaceholders.agentTurn')
+              : t('pages.cron.form.payloadTextPlaceholders.systemEvent')"
           />
         </NFormItem>
 
@@ -1676,7 +1790,7 @@ function jobRowProps(row: CronJob) {
             :bordered="false"
             style="margin-bottom: 10px;"
           >
-            模型配置读取失败，暂时无法按 openclaw.json 过滤：{{ configStore.lastError }}
+            {{ t('pages.cron.modelConfigLoadFailed', { error: configStore.lastError }) }}
           </NAlert>
           <NAlert
             v-if="modelStore.lastError"
@@ -1685,11 +1799,11 @@ function jobRowProps(row: CronJob) {
             :bordered="false"
             style="margin-bottom: 10px;"
           >
-            模型列表拉取失败，可继续手动输入模型：{{ modelStore.lastError }}
+            {{ t('pages.cron.modelListLoadFailed', { error: modelStore.lastError }) }}
           </NAlert>
           <NGrid cols="1 s:2" responsive="screen" :x-gap="10">
             <NGridItem>
-              <NFormItem label="模型覆盖">
+              <NFormItem :label="t('pages.cron.form.modelOverride')">
                 <NSelect
                   v-model:value="form.model"
                   :options="modelSelectOptions"
@@ -1697,18 +1811,18 @@ function jobRowProps(row: CronJob) {
                   filterable
                   tag
                   clearable
-                  placeholder="选择可用模型，或输入别名（可选）"
+                  :placeholder="t('pages.cron.form.modelOverridePlaceholder')"
                 />
               </NFormItem>
             </NGridItem>
             <NGridItem>
-              <NFormItem label="超时秒数">
+              <NFormItem :label="t('pages.cron.form.timeoutSeconds')">
                 <NInputNumber
                   v-model:value="form.timeoutSeconds"
                   :min="1"
                   :precision="0"
                   :show-button="false"
-                  placeholder="例如：120"
+                  :placeholder="t('pages.cron.form.timeoutSecondsPlaceholder')"
                   style="width: 100%;"
                 />
               </NFormItem>
@@ -1717,21 +1831,21 @@ function jobRowProps(row: CronJob) {
         </template>
 
         <template v-if="form.sessionTarget === 'isolated' && form.payloadKind === 'agentTurn'">
-          <NDivider title-placement="left">投递策略</NDivider>
+          <NDivider title-placement="left">{{ t('pages.cron.modal.sections.delivery') }}</NDivider>
           <NGrid cols="1 s:3" responsive="screen" :x-gap="10">
             <NGridItem>
-              <NFormItem label="投递模式">
+              <NFormItem :label="t('pages.cron.form.deliveryMode')">
                 <NSelect
                   v-model:value="form.deliveryMode"
                   :options="[
-                    { label: 'announce（摘要投递）', value: 'announce' },
-                    { label: 'none（仅内部运行）', value: 'none' },
+                    { label: t('pages.cron.form.deliveryModes.announce'), value: 'announce' },
+                    { label: t('pages.cron.form.deliveryModes.none'), value: 'none' },
                   ]"
                 />
               </NFormItem>
             </NGridItem>
             <NGridItem>
-              <NFormItem label="投递频道">
+              <NFormItem :label="t('pages.cron.form.deliveryChannel')">
                 <NSelect
                   v-model:value="form.deliveryChannel"
                   :disabled="form.deliveryMode === 'none'"
@@ -1740,7 +1854,7 @@ function jobRowProps(row: CronJob) {
               </NFormItem>
             </NGridItem>
             <NGridItem>
-              <NFormItem label="投递目标">
+              <NFormItem :label="t('pages.cron.form.deliveryTo')">
                 <NSelect
                   v-model:value="form.deliveryTo"
                   :disabled="form.deliveryMode === 'none'"
@@ -1749,30 +1863,30 @@ function jobRowProps(row: CronJob) {
                   tag
                   clearable
                   :placeholder="form.deliveryChannel === 'last'
-                    ? '可选：留空时沿用最近会话路由'
-                    : '选择已配置目标，或手动输入'"
+                    ? t('pages.cron.form.deliveryToPlaceholders.last')
+                    : t('pages.cron.form.deliveryToPlaceholders.specific')"
                 />
               </NFormItem>
             </NGridItem>
           </NGrid>
-          <NFormItem label="bestEffort">
+          <NFormItem :label="t('pages.cron.form.bestEffort')">
             <NSwitch v-model:value="form.deliveryBestEffort" :disabled="form.deliveryMode === 'none'" />
           </NFormItem>
         </template>
 
-        <NDivider title-placement="left">保存预览（发送到网关）</NDivider>
+        <NDivider title-placement="left">{{ t('pages.cron.modal.sections.preview') }}</NDivider>
         <NCode :code="previewPayload" language="json" :word-wrap="true" />
       </NForm>
 
       <template #footer>
         <NSpace justify="space-between" align="center">
           <NText depth="3" style="font-size: 12px;">
-            任务将写入 Gateway 的 cron 存储，并由网关进程调度执行。
+            {{ t('pages.cron.modal.footerHint') }}
           </NText>
           <NSpace>
-            <NButton @click="showModal = false">取消</NButton>
+            <NButton @click="showModal = false">{{ t('common.cancel') }}</NButton>
             <NButton type="primary" :loading="cronStore.saving" @click="handleSubmit">
-              {{ isEditing ? '保存修改' : '创建任务' }}
+              {{ isEditing ? t('pages.cron.actions.saveChanges') : t('pages.cron.actions.createJob') }}
             </NButton>
           </NSpace>
         </NSpace>

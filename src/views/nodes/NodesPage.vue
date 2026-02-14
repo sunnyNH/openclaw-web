@@ -15,12 +15,14 @@ import {
   useMessage,
 } from 'naive-ui'
 import { RefreshOutline, CheckmarkOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useNodeStore } from '@/stores/node'
 import { formatRelativeTime } from '@/utils/format'
 import type { DeviceNode } from '@/api/types'
 
 const nodeStore = useNodeStore()
 const message = useMessage()
+const { t } = useI18n()
 
 const showPairModal = ref(false)
 const pairNodeId = ref('')
@@ -49,26 +51,26 @@ function startPairing(node: DeviceNode) {
 
 async function confirmPairing() {
   if (!pairCode.value.trim()) {
-    message.warning('请输入配对码')
+    message.warning(t('pages.nodes.pairCodeRequired'))
     return
   }
   try {
     await nodeStore.approvePairing(pairNodeId.value, pairCode.value)
-    message.success('配对成功')
+    message.success(t('pages.nodes.pairSuccess'))
     showPairModal.value = false
   } catch {
-    message.error('配对失败')
+    message.error(t('pages.nodes.pairFailed'))
   }
 }
 </script>
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="节点管理" class="app-card">
+    <NCard :title="t('pages.nodes.title')" class="app-card">
       <template #header-extra>
         <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="nodeStore.fetchNodes()">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          刷新
+          {{ t('common.refresh') }}
         </NButton>
       </template>
 
@@ -88,7 +90,7 @@ async function confirmPairing() {
                     </div>
                   </NSpace>
                   <NTag :type="node.connected ? 'success' : 'default'" size="small" round :bordered="false">
-                    {{ node.connected ? '在线' : '离线' }}
+                    {{ node.connected ? t('common.online') : t('common.offline') }}
                   </NTag>
                 </NSpace>
 
@@ -118,7 +120,7 @@ async function confirmPairing() {
                     @click="startPairing(node)"
                   >
                     <template #icon><NIcon :component="CheckmarkOutline" /></template>
-                    配对
+                    {{ t('pages.nodes.pair') }}
                   </NButton>
                 </NSpace>
               </NSpace>
@@ -130,7 +132,7 @@ async function confirmPairing() {
           v-if="!nodeStore.loading && nodeStore.nodes.length === 0"
           style="text-align: center; padding: 60px 0; color: var(--text-secondary);"
         >
-          暂无已配对的设备节点
+          {{ t('pages.nodes.empty') }}
         </div>
       </NSpin>
     </NCard>
@@ -138,16 +140,16 @@ async function confirmPairing() {
     <NModal
       v-model:show="showPairModal"
       preset="dialog"
-      title="设备配对"
-      positive-text="确认配对"
-      negative-text="取消"
+      :title="t('pages.nodes.pairDialogTitle')"
+      :positive-text="t('pages.nodes.confirmPair')"
+      :negative-text="t('common.cancel')"
       @positive-click="confirmPairing"
     >
       <NSpace vertical :size="12" style="margin-top: 16px;">
-        <NText>请输入设备上显示的配对码：</NText>
+        <NText>{{ t('pages.nodes.pairPrompt') }}</NText>
         <NInput
           v-model:value="pairCode"
-          placeholder="输入配对码"
+          :placeholder="t('pages.nodes.pairCodePlaceholder')"
           @keydown.enter="confirmPairing"
         />
       </NSpace>

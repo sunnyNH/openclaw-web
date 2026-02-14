@@ -28,6 +28,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { AddOutline, RefreshOutline, SaveOutline, SearchOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '@/stores/config'
 import { useWebSocketStore } from '@/stores/websocket'
 import type { DataTableColumns } from 'naive-ui'
@@ -36,6 +37,12 @@ import type { ConfigPatch, ModelProviderConfig } from '@/api/types'
 const configStore = useConfigStore()
 const wsStore = useWebSocketStore()
 const message = useMessage()
+const { t, locale } = useI18n()
+
+function joinDisplayList(values: string[]): string {
+  const separator = locale.value === 'zh-CN' ? '、' : ', '
+  return values.join(separator)
+}
 
 const primaryModel = ref('')
 const selectedProviderId = ref('')
@@ -595,15 +602,17 @@ const currentEditingProviderId = computed(() =>
 )
 const providerEditorTitle = computed(() =>
   editingExistingProvider.value
-    ? `编辑渠道：${currentEditingProviderId.value}`
+    ? t('pages.models.editor.titleEdit', { id: currentEditingProviderId.value })
     : selectedProviderId.value
-      ? `渠道详情缺失：${normalizeProviderId(selectedProviderId.value)}`
-      : '请选择已配置渠道'
+      ? t('pages.models.editor.titleMissing', { id: normalizeProviderId(selectedProviderId.value) })
+      : t('pages.models.editor.titleSelect')
 )
-const providerSubmitLabel = computed(() => '保存修改')
+const providerSubmitLabel = computed(() => t('pages.models.actions.saveChanges'))
 
 const apiKeyPlaceholder = computed(() =>
-  editingExistingProvider.value ? '留空表示保持现有 Key 不变' : '输入渠道 Key'
+  editingExistingProvider.value
+    ? t('pages.models.form.apiKeyPlaceholderEdit')
+    : t('pages.models.form.apiKeyPlaceholderCreate')
 )
 
 const currentModelIds = computed(() => parseModelIds(providerForm.modelIdsText))
@@ -653,11 +662,11 @@ const editChangePreview = computed(() => {
   const apiChanged = existingApi !== nextApi
   const baseUrlChanged = existingBaseUrl !== nextBaseUrl
   if (willPatchApiKey) {
-    warnings.push('将写入新的 API Key，保存后页面不会回显明文 Key')
+    warnings.push(t('pages.models.preview.warnings.overwriteApiKey'))
     patchPaths.push(`${providerBasePath}.apiKey`)
   }
   if (shouldMigrateLegacyProviderPath) {
-    warnings.push('将自动迁移 legacy 渠道路径（models.<id> -> models.providers.<id>）')
+    warnings.push(t('pages.models.preview.warnings.migrateLegacyPath'))
     patchPaths.push(`models.${providerId}`)
   }
 
@@ -669,7 +678,7 @@ const editChangePreview = computed(() => {
   }
 
   if (removedModelIds.length > 0) {
-    warnings.push('本次会移除部分已配置模型，请确认不会影响线上默认模型或路由规则')
+    warnings.push(t('pages.models.preview.warnings.removeModels'))
   }
 
   const hasChanges =
@@ -727,8 +736,8 @@ const createChangePreview = computed(() => {
   const patchPaths: string[] = []
 
   if (!providerId) {
-    warnings.push('未填写渠道 ID')
-    missingRequired.push('渠道 ID')
+    warnings.push(t('pages.models.preview.warnings.providerIdMissing'))
+    missingRequired.push(t('pages.models.fields.providerId'))
   } else {
     patchPaths.push(
       `models.providers.${providerId}.api`,
@@ -739,24 +748,24 @@ const createChangePreview = computed(() => {
   }
 
   if (providerExists) {
-    warnings.push('该渠道 ID 已存在，请改用其他 ID')
+    warnings.push(t('pages.models.preview.warnings.providerIdExists'))
   }
 
   if (baseUrl) {
   } else {
-    warnings.push('未填写 Base URL')
-    missingRequired.push('Base URL')
+    warnings.push(t('pages.models.preview.warnings.baseUrlMissing'))
+    missingRequired.push(t('pages.models.fields.baseUrl'))
   }
 
   if (modelIds.length === 0) {
-    warnings.push('未填写模型列表（可先点击“探测模型”）')
-    missingRequired.push('模型列表')
+    warnings.push(t('pages.models.preview.warnings.modelListMissing'))
+    missingRequired.push(t('pages.models.fields.models'))
   }
 
   if (hasApiKey) {
   } else {
-    warnings.push('未填写 API Key，当前无法创建渠道')
-    missingRequired.push('API Key')
+    warnings.push(t('pages.models.preview.warnings.apiKeyMissing'))
+    missingRequired.push(t('pages.models.fields.apiKey'))
   }
 
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
@@ -793,10 +802,14 @@ const createChangePreview = computed(() => {
   }
 })
 const saveConfirmTitle = computed(() =>
-  confirmActionType.value === 'edit' ? '确认保存渠道修改' : '确认创建渠道'
+  confirmActionType.value === 'edit'
+    ? t('pages.models.confirm.titleEdit')
+    : t('pages.models.confirm.titleCreate')
 )
 const saveConfirmButtonLabel = computed(() =>
-  confirmActionType.value === 'edit' ? '确认保存' : '确认创建'
+  confirmActionType.value === 'edit'
+    ? t('pages.models.confirm.buttonEdit')
+    : t('pages.models.confirm.buttonCreate')
 )
 const canConfirmSave = computed(() =>
   confirmActionType.value === 'edit'
@@ -848,9 +861,9 @@ function sourceTagType(source: string): 'default' | 'info' | 'success' | 'warnin
   return 'warning'
 }
 
-const providerColumns: DataTableColumns<ProviderSummary> = [
+const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
   {
-    title: '渠道',
+    title: t('pages.models.table.providers.provider'),
     key: 'id',
     width: 136,
     ellipsis: { tooltip: true },
@@ -859,7 +872,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
     },
   },
   {
-    title: '协议',
+    title: t('pages.models.table.providers.protocol'),
     key: 'api',
     width: 132,
     ellipsis: { tooltip: true },
@@ -868,7 +881,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
     },
   },
   {
-    title: 'Base URL',
+    title: t('pages.models.table.providers.baseUrl'),
     key: 'baseUrl',
     width: 256,
     ellipsis: { tooltip: true },
@@ -877,7 +890,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
     },
   },
   {
-    title: '模型数',
+    title: t('pages.models.table.providers.models'),
     key: 'modelCount',
     width: 76,
     align: 'center',
@@ -886,17 +899,17 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
     },
   },
   {
-    title: '来源',
+    title: t('pages.models.table.providers.sources'),
     key: 'sources',
     width: 84,
     align: 'center',
     ellipsis: { tooltip: true },
     render(row) {
-      return row.sources.length > 0 ? `${row.sources.length} 个` : '-'
+      return row.sources.length > 0 ? t('common.itemsCount', { count: row.sources.length }) : '-'
     },
   },
   {
-    title: '操作',
+    title: t('pages.models.table.providers.actions'),
     key: 'actions',
     width: 214,
     render(row) {
@@ -911,7 +924,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
                 h(
                   NButton,
                   { size: 'tiny', quaternary: true, onClick: () => handleLoadProvider(row.id) },
-                  { default: () => '编辑' }
+                  { default: () => t('common.edit') }
                 ),
               ]
             : []),
@@ -924,7 +937,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
               disabled: isPrimaryProvider,
               onClick: () => handleUseProviderAsPrimary(row.id, row.modelIds),
             },
-            { default: () => (isPrimaryProvider ? '默认中' : '设默认') }
+            { default: () => (isPrimaryProvider ? t('pages.models.default.active') : t('pages.models.default.set')) }
           ),
           ...(isManagedProvider
             ? [
@@ -932,8 +945,8 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
                   NPopconfirm,
                   {
                     onPositiveClick: () => handleDeleteProvider(row.id),
-                    positiveText: '删除',
-                    negativeText: '取消',
+                    positiveText: t('common.delete'),
+                    negativeText: t('common.cancel'),
                   },
                   {
                     trigger: () =>
@@ -946,12 +959,12 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
                           disabled: isPrimaryProvider,
                           onClick: (e: MouseEvent) => e.stopPropagation(),
                         },
-                        { default: () => '删除' }
+                        { default: () => t('common.delete') }
                       ),
                     default: () =>
                       isPrimaryProvider
-                        ? '当前默认渠道不可删除，请先切换默认模型。'
-                        : `确认删除渠道 ${row.id}？`,
+                        ? t('pages.models.confirm.deleteDefaultProviderBlocked')
+                        : t('pages.models.confirm.deleteProvider', { id: row.id }),
                   }
                 ),
               ]
@@ -960,7 +973,7 @@ const providerColumns: DataTableColumns<ProviderSummary> = [
       )
     },
   },
-]
+])
 
 function providerRowProps(row: ProviderSummary) {
   const isManagedProvider = managedProviderIdSet.value.has(row.id)
@@ -976,9 +989,9 @@ function providerRowProps(row: ProviderSummary) {
   }
 }
 
-const configuredModelColumns: DataTableColumns<ConfiguredModelRow> = [
+const configuredModelColumns = computed<DataTableColumns<ConfiguredModelRow>>(() => [
   {
-    title: '模型引用',
+    title: t('pages.models.table.models.modelRef'),
     key: 'modelRef',
     minWidth: 260,
     ellipsis: { tooltip: true },
@@ -987,7 +1000,7 @@ const configuredModelColumns: DataTableColumns<ConfiguredModelRow> = [
     },
   },
   {
-    title: '操作',
+    title: t('pages.models.table.models.actions'),
     key: 'actions',
     width: 120,
     render(row) {
@@ -1001,11 +1014,11 @@ const configuredModelColumns: DataTableColumns<ConfiguredModelRow> = [
           disabled: isPrimaryModel,
           onClick: () => handleUseModelAsPrimary(row.modelRef),
         },
-        { default: () => (isPrimaryModel ? '默认中' : '设为默认') }
+        { default: () => (isPrimaryModel ? t('pages.models.default.active') : t('pages.models.default.set')) }
       )
     },
   },
-]
+])
 
 watch(
   () => configStore.config,
@@ -1489,7 +1502,7 @@ function handleLoadProvider(providerId: string) {
 async function savePrimaryModel(targetInput: string): Promise<void> {
   const target = targetInput.trim()
   if (!target) {
-    message.warning('请先选择或输入默认模型')
+    message.warning(t('pages.models.messages.primaryModelRequired'))
     return
   }
 
@@ -1515,15 +1528,15 @@ async function savePrimaryModel(targetInput: string): Promise<void> {
   try {
     await configStore.patchConfig(patches)
     primaryModel.value = target
-    message.success(`默认模型已保存：${target}`)
+    message.success(t('pages.models.messages.primaryModelSaved', { model: target }))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '保存失败')
+    message.error(error instanceof Error ? error.message : t('common.saveFailed'))
   }
 }
 
 async function handleUseProviderAsPrimary(providerId: string, modelIds: string[]) {
   if (modelIds.length === 0) {
-    message.warning('该渠道没有可用模型，无法设置默认模型')
+    message.warning(t('pages.models.messages.noModelsForProvider'))
     return
   }
   const primary = `${providerId}/${modelIds[0]}`
@@ -1541,12 +1554,12 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
   if (!providerId) return
 
   if (providerId === currentPrimaryProviderId.value) {
-    message.warning('当前默认渠道不允许删除，请先切换默认模型')
+    message.warning(t('pages.models.messages.deleteDefaultProviderBlocked'))
     return
   }
 
   if (!providerMap.value[providerId]) {
-    message.warning('该渠道来自模型白名单（如 agents.defaults.models），不支持删除')
+    message.warning(t('pages.models.messages.deleteWhitelistProviderBlocked'))
     return
   }
 
@@ -1574,16 +1587,16 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
     if (selectedProviderId.value === providerId) {
       selectedProviderId.value = ''
     }
-    message.success(`已删除渠道：${providerId}`)
+    message.success(t('pages.models.messages.providerDeleted', { id: providerId }))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '删除失败')
+    message.error(error instanceof Error ? error.message : t('pages.models.messages.deleteFailed'))
   }
 }
 
 async function probeModelsFromProvider(baseUrl: string, apiKey: string, apiType: string): Promise<string[]> {
   const urls = buildProbeUrls(baseUrl, apiType)
   if (urls.length === 0) {
-    throw new Error('Base URL 不能为空')
+    throw new Error(t('pages.models.validation.baseUrlRequired'))
   }
 
   const isGoogleApi = apiType === 'google-generative-ai'
@@ -1614,18 +1627,18 @@ async function probeModelsFromProvider(baseUrl: string, apiKey: string, apiType:
       if (modelIds.length > 0) {
         return modelIds
       }
-      lastError = `${requestUrl} 返回成功，但未解析到模型列表`
+      lastError = t('pages.models.probe.noModelsParsed', { url: requestUrl })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       if (isGoogleApi && /failed to fetch/i.test(reason)) {
-        lastError = `${url} 请求失败：浏览器跨域限制（CORS）。请先保存渠道后在编辑态探测（走网关）或手动填写模型 ID。`
+        lastError = t('pages.models.probe.fetchFailedCors', { url })
       } else {
-        lastError = `${url} 请求失败：${reason}`
+        lastError = t('pages.models.probe.fetchFailed', { url, reason })
       }
     }
   }
 
-  throw new Error(lastError || '探测失败')
+  throw new Error(lastError || t('pages.models.probe.failed'))
 }
 
 async function probeModelsFromGateway(providerId: string): Promise<string[]> {
@@ -1659,14 +1672,14 @@ async function handleProbeModels() {
   const existingProviderKey = readProviderApiKeyForProbe(providerMap.value[currentEditingProviderId.value])
   const apiKey = inputApiKey || existingProviderKey
   if (!baseUrl) {
-    message.warning('请填写 Base URL')
+    message.warning(t('pages.models.validation.baseUrlRequired'))
     return
   }
   if (!apiKey) {
     if (selectedProviderHasKey.value) {
-      message.warning('当前渠道 Key 已配置但不可读取，请手动输入一次用于探测')
+      message.warning(t('pages.models.messages.apiKeyNotReadableForProbe'))
     } else {
-      message.warning('请填写 API Key')
+      message.warning(t('pages.models.validation.apiKeyRequired'))
     }
     return
   }
@@ -1677,7 +1690,7 @@ async function handleProbeModels() {
     const modelIds = await probeModelsFromProvider(baseUrl, apiKey, apiType)
     providerForm.modelIdsText = modelIds.join('\n')
     editActiveTab.value = 'models'
-    message.success(`探测到 ${modelIds.length} 个模型`)
+    message.success(t('pages.models.messages.modelsProbed', { count: modelIds.length }))
   } catch (error) {
     const errorText = error instanceof Error ? error.message : String(error)
     if (providerId) {
@@ -1686,7 +1699,7 @@ async function handleProbeModels() {
         if (runtimeModelIds.length > 0) {
           providerForm.modelIdsText = runtimeModelIds.join('\n')
           editActiveTab.value = 'models'
-          message.success(`直连失败，已通过网关读取到 ${runtimeModelIds.length} 个模型`)
+          message.success(t('pages.models.messages.modelsProbedFromGateway', { count: runtimeModelIds.length }))
           return
         }
       } catch {
@@ -1694,7 +1707,7 @@ async function handleProbeModels() {
       }
     }
     probeError.value = errorText
-    message.error('模型探测失败')
+    message.error(t('pages.models.messages.modelProbeFailed'))
   } finally {
     probing.value = false
   }
@@ -1713,11 +1726,11 @@ async function handleSaveProvider(confirmed = false) {
   const shouldPatchApiKey = !!apiKey && !maskedKey
 
   if (!existingProvider) {
-    message.warning('请从左侧选择已配置渠道进行编辑；新增请使用“新建渠道”')
+    message.warning(t('pages.models.messages.selectProviderToEdit'))
     return
   }
   if (!editChangePreview.value?.hasChanges) {
-    message.info('未检测到配置变更')
+    message.info(t('pages.models.messages.noConfigChanges'))
     return
   }
   if (!confirmed) {
@@ -1725,19 +1738,19 @@ async function handleSaveProvider(confirmed = false) {
     return
   }
   if (!providerId) {
-    message.warning('请填写渠道 ID')
+    message.warning(t('pages.models.validation.providerIdRequired'))
     return
   }
   if (!/^[a-z0-9_-]+$/.test(providerId)) {
-    message.warning('渠道 ID 仅支持小写字母、数字、下划线和中划线')
+    message.warning(t('pages.models.validation.providerIdInvalid'))
     return
   }
   if (!baseUrl) {
-    message.warning('请填写 Base URL')
+    message.warning(t('pages.models.validation.baseUrlRequired'))
     return
   }
   if (finalModelIds.length === 0) {
-    message.warning('请先探测模型或手动填写模型 ID')
+    message.warning(t('pages.models.validation.modelsRequired'))
     return
   }
 
@@ -1780,9 +1793,11 @@ async function handleSaveProvider(confirmed = false) {
     selectedProviderId.value = providerId
     providerForm.id = providerId
     providerForm.apiKey = ''
-    message.success(shouldPatchApiKey ? '模型渠道已保存' : '模型渠道已保存（Key 保持不变）')
+    message.success(shouldPatchApiKey
+      ? t('pages.models.messages.providerSaved')
+      : t('pages.models.messages.providerSavedKeepKey'))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '保存失败')
+    message.error(error instanceof Error ? error.message : t('common.saveFailed'))
   }
 }
 
@@ -1791,11 +1806,11 @@ async function handleProbeCreateProviderModels() {
   const apiType = createProviderForm.api || 'openai-completions'
   const apiKey = createProviderForm.apiKey.trim()
   if (!baseUrl) {
-    message.warning('请填写 Base URL')
+    message.warning(t('pages.models.validation.baseUrlRequired'))
     return
   }
   if (!apiKey) {
-    message.warning('请填写 API Key')
+    message.warning(t('pages.models.validation.apiKeyRequired'))
     return
   }
 
@@ -1805,11 +1820,11 @@ async function handleProbeCreateProviderModels() {
     const modelIds = await probeModelsFromProvider(baseUrl, apiKey, apiType)
     createProviderForm.modelIdsText = modelIds.join('\n')
     createActiveTab.value = 'models'
-    message.success(`探测到 ${modelIds.length} 个模型`)
+    message.success(t('pages.models.messages.modelsProbed', { count: modelIds.length }))
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     createProbeError.value = reason
-    message.error('模型探测失败')
+    message.error(t('pages.models.messages.modelProbeFailed'))
   } finally {
     probingCreateProvider.value = false
   }
@@ -1823,27 +1838,27 @@ async function handleCreateProvider(confirmed = false) {
   const modelIds = parseModelIds(createProviderForm.modelIdsText)
 
   if (!providerId) {
-    message.warning('请填写渠道 ID')
+    message.warning(t('pages.models.validation.providerIdRequired'))
     return
   }
   if (!/^[a-z0-9_-]+$/.test(providerId)) {
-    message.warning('渠道 ID 仅支持小写字母、数字、下划线和中划线')
+    message.warning(t('pages.models.validation.providerIdInvalid'))
     return
   }
   if (providerMap.value[providerId]) {
-    message.warning('该渠道已存在，请在左侧列表中编辑')
+    message.warning(t('pages.models.validation.providerIdExists'))
     return
   }
   if (!baseUrl) {
-    message.warning('请填写 Base URL')
+    message.warning(t('pages.models.validation.baseUrlRequired'))
     return
   }
   if (!apiKey) {
-    message.warning('新建渠道时必须填写 API Key')
+    message.warning(t('pages.models.validation.apiKeyRequiredForCreate'))
     return
   }
   if (modelIds.length === 0) {
-    message.warning('请先探测模型或手动填写模型 ID')
+    message.warning(t('pages.models.validation.modelsRequired'))
     return
   }
   if (!confirmed) {
@@ -1881,9 +1896,9 @@ async function handleCreateProvider(confirmed = false) {
     showCreateProviderModal.value = false
     selectedProviderId.value = providerId
     loadProviderForm(providerId)
-    message.success('模型渠道已创建')
+    message.success(t('pages.models.messages.providerCreated'))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '创建失败')
+    message.error(error instanceof Error ? error.message : t('pages.models.messages.createFailed'))
   }
 }
 
@@ -1908,17 +1923,17 @@ function handleCreateProviderClick() {
   <div class="models-page">
     <NCard class="models-overview-card" :bordered="false">
       <template #header>
-        <div class="models-overview-title">模型管理总览</div>
+        <div class="models-overview-title">{{ t('pages.models.overview.title') }}</div>
       </template>
       <template #header-extra>
         <NButton size="small" :loading="configStore.loading" @click="configStore.fetchConfig()">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          刷新配置
+          {{ t('pages.models.actions.refreshConfig') }}
         </NButton>
       </template>
 
       <NAlert type="info" :bordered="false" style="margin-bottom: 12px;">
-        模型引用格式为 <code>provider/model</code>，建议通过 <code>models.providers</code> 统一维护渠道。
+        {{ t('pages.models.overview.hintPrefix') }}<code>provider/model</code>{{ t('pages.models.overview.hintMiddle') }}<code>models.providers</code>{{ t('pages.models.overview.hintSuffix') }}
       </NAlert>
 
       <NAlert v-if="configStore.lastError" type="error" :bordered="false" style="margin-bottom: 12px;">
@@ -1927,26 +1942,26 @@ function handleCreateProviderClick() {
 
       <div class="models-overview-metrics">
         <div class="models-metric-item">
-          <NText depth="3">渠道总数</NText>
+          <NText depth="3">{{ t('pages.models.overview.metrics.providers') }}</NText>
           <div class="models-metric-value">{{ providerStats.providerCount }}</div>
         </div>
         <div class="models-metric-item">
-          <NText depth="3">模型引用数</NText>
+          <NText depth="3">{{ t('pages.models.overview.metrics.modelRefs') }}</NText>
           <div class="models-metric-value">{{ providerStats.modelCount }}</div>
         </div>
         <div class="models-metric-item">
-          <NText depth="3">当前编辑</NText>
+          <NText depth="3">{{ t('pages.models.overview.metrics.editing') }}</NText>
           <div class="models-metric-value">{{ providerStats.selectedProvider }}</div>
         </div>
         <div class="models-metric-item">
-          <NText depth="3">默认模型</NText>
+          <NText depth="3">{{ t('pages.models.overview.metrics.primaryModel') }}</NText>
           <div class="models-metric-value models-metric-code">{{ primaryModelDisplay }}</div>
         </div>
       </div>
 
     </NCard>
 
-    <NCard title="渠道工作台" class="models-workbench-card">
+    <NCard :title="t('pages.models.workbench.title')" class="models-workbench-card">
       <NGrid cols="1 xl:12" responsive="screen" :x-gap="16" :y-gap="16">
         <NGridItem class="models-workbench-item" span="1 xl:8">
           <div class="models-panel">
@@ -1954,12 +1969,12 @@ function handleCreateProviderClick() {
               <NInput
                 v-model:value="providerSearch"
                 size="small"
-                placeholder="搜索渠道 / Base URL / 模型"
+                :placeholder="t('pages.models.workbench.searchPlaceholder')"
                 style="width: 100%; max-width: 340px;"
               />
               <NButton size="small" type="primary" @click="handleNewProvider">
                 <template #icon><NIcon :component="AddOutline" /></template>
-                新建渠道
+                {{ t('pages.models.actions.createProvider') }}
               </NButton>
             </NSpace>
 
@@ -1977,11 +1992,11 @@ function handleCreateProviderClick() {
 
             <NEmpty
               v-if="!configStore.loading && providerSummaries.length === 0"
-              description="未读取到任何已配置渠道"
+              :description="t('pages.models.workbench.empty')"
               class="models-empty"
             >
               <template #extra>
-                <NText depth="3">请检查 <code>models.providers</code> 配置或 Token 权限</NText>
+                <NText depth="3">{{ t('pages.models.workbench.emptyHint') }}</NText>
               </template>
             </NEmpty>
           </div>
@@ -1992,7 +2007,9 @@ function handleCreateProviderClick() {
             <div class="models-editor-header">
               <NText strong>{{ providerEditorTitle }}</NText>
               <NSpace v-if="selectedProviderSummary" :size="6" style="flex-wrap: wrap;">
-                <NTag size="small" :bordered="false">模型 {{ selectedProviderSummary.modelIds.length }}</NTag>
+                <NTag size="small" :bordered="false">
+                  {{ t('pages.models.editor.modelsCount', { count: selectedProviderSummary.modelIds.length }) }}
+                </NTag>
                 <NTag
                   v-for="source in selectedProviderSummary.sources"
                   :key="source"
@@ -2007,22 +2024,22 @@ function handleCreateProviderClick() {
 
             <template v-if="editingExistingProvider">
               <NTabs v-model:value="editActiveTab" type="line" animated>
-                <NTabPane name="basic" tab="1. 基本信息">
+                <NTabPane name="basic" :tab="t('pages.models.tabs.basic')">
                   <NForm label-placement="left" label-width="100">
-                    <NFormItem label="渠道 ID">
+                    <NFormItem :label="t('pages.models.form.providerId')">
                       <NInput
                         v-model:value="providerForm.id"
                         :disabled="true"
-                        placeholder="例如：moonshot / openrouter / myproxy"
+                        :placeholder="t('pages.models.form.providerIdPlaceholder')"
                       />
                     </NFormItem>
-                    <NFormItem label="API 协议">
+                    <NFormItem :label="t('pages.models.form.apiProtocol')">
                       <NSelect v-model:value="providerForm.api" :options="apiOptions" />
                     </NFormItem>
-                    <NFormItem label="Base URL">
-                      <NInput v-model:value="providerForm.baseUrl" placeholder="例如：https://api.openai.com/v1" />
+                    <NFormItem :label="t('pages.models.form.baseUrl')">
+                      <NInput v-model:value="providerForm.baseUrl" :placeholder="t('pages.models.form.baseUrlPlaceholder')" />
                     </NFormItem>
-                    <NFormItem label="API Key">
+                    <NFormItem :label="t('pages.models.form.apiKey')">
                       <NSpace vertical :size="6" style="width: 100%;">
                         <NInput
                           v-model:value="providerForm.apiKey"
@@ -2031,42 +2048,42 @@ function handleCreateProviderClick() {
                           :placeholder="apiKeyPlaceholder"
                         />
                         <NText depth="3" style="font-size: 12px;">
-                          留空会保持线上 Key 不变；探测模型会优先使用已配置 Key（可读取时）。
+                          {{ t('pages.models.form.apiKeyHint') }}
                         </NText>
                       </NSpace>
                     </NFormItem>
-                    <NFormItem label="Key 状态">
+                    <NFormItem :label="t('pages.models.form.apiKeyStatus')">
                       <NTag size="small" :bordered="false" :type="selectedProviderHasKey ? 'success' : 'default'">
-                        {{ selectedProviderHasKey ? '已配置（已隐藏）' : '未配置' }}
+                        {{ selectedProviderHasKey ? t('pages.models.form.apiKeyStatusConfigured') : t('pages.models.form.apiKeyStatusNotConfigured') }}
                       </NTag>
                     </NFormItem>
                     <NFormItem>
                       <NSpace justify="end" style="width: 100%;">
-                        <NButton @click="editActiveTab = 'models'">下一步：模型管理</NButton>
+                        <NButton @click="editActiveTab = 'models'">{{ t('pages.models.actions.nextToModels') }}</NButton>
                       </NSpace>
                     </NFormItem>
                   </NForm>
                 </NTabPane>
 
-                <NTabPane name="models" tab="2. 模型管理">
+                <NTabPane name="models" :tab="t('pages.models.tabs.models')">
                   <NForm label-placement="left" label-width="100">
-                    <NFormItem label="输入类型">
+                    <NFormItem :label="t('pages.models.form.modelInputTypes')">
                       <NSelect
                         v-model:value="providerForm.modelInputTypes"
                         :options="modelInputTypeOptions"
                         multiple
-                        placeholder="选择该渠道模型支持的输入类型（可多选）"
+                        :placeholder="t('pages.models.form.modelInputTypesPlaceholder')"
                       />
                     </NFormItem>
-                    <NFormItem label="模型列表">
+                    <NFormItem :label="t('pages.models.form.models')">
                       <NInput
                         v-model:value="providerForm.modelIdsText"
                         type="textarea"
                         :autosize="{ minRows: 5, maxRows: 10 }"
-                        placeholder="一行一个模型 ID；可点击“探测模型”自动填充"
+                        :placeholder="t('pages.models.form.modelsPlaceholder')"
                       />
                     </NFormItem>
-                    <NFormItem v-if="currentModelIds.length" label="已识别">
+                    <NFormItem v-if="currentModelIds.length" :label="t('pages.models.form.detectedModels')">
                       <NSpace :size="6" style="flex-wrap: wrap;">
                         <NTag
                           v-for="id in currentModelIds.slice(0, 20)"
@@ -2076,7 +2093,9 @@ function handleCreateProviderClick() {
                         >
                           {{ id }}
                         </NTag>
-                        <NText depth="3" v-if="currentModelIds.length > 20">共 {{ currentModelIds.length }} 个模型</NText>
+                        <NText depth="3" v-if="currentModelIds.length > 20">
+                          {{ t('pages.models.form.modelsCount', { count: currentModelIds.length }) }}
+                        </NText>
                       </NSpace>
                     </NFormItem>
                     <NFormItem>
@@ -2084,12 +2103,12 @@ function handleCreateProviderClick() {
                         <NSpace>
                           <NButton :loading="probing" @click="handleProbeModels">
                             <template #icon><NIcon :component="SearchOutline" /></template>
-                            探测模型
+                            {{ t('pages.models.actions.probeModels') }}
                           </NButton>
                         </NSpace>
                         <NSpace>
-                          <NButton @click="editActiveTab = 'basic'">上一步</NButton>
-                          <NButton type="primary" @click="editActiveTab = 'preview'">下一步：保存预览</NButton>
+                          <NButton @click="editActiveTab = 'basic'">{{ t('pages.models.actions.prev') }}</NButton>
+                          <NButton type="primary" @click="editActiveTab = 'preview'">{{ t('pages.models.actions.nextToPreview') }}</NButton>
                         </NSpace>
                       </NSpace>
                     </NFormItem>
@@ -2099,11 +2118,11 @@ function handleCreateProviderClick() {
                   </NAlert>
                 </NTabPane>
 
-                <NTabPane name="preview" tab="3. 保存预览">
+                <NTabPane name="preview" :tab="t('pages.models.tabs.preview')">
                   <NSpace vertical :size="10">
                     <div class="models-preview-grid">
                       <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiDiff.changed }">
-                        <NText depth="3" class="models-preview-label">API 协议</NText>
+                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.apiProtocol') }}</NText>
                         <div class="models-preview-diff">
                           <code>{{ editChangePreview?.apiDiff.before || '-' }}</code>
                           <span class="models-preview-arrow">→</span>
@@ -2121,7 +2140,7 @@ function handleCreateProviderClick() {
                       </div>
 
                       <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.modelDiff.changed }">
-                        <NText depth="3" class="models-preview-label">模型数量</NText>
+                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.models') }}</NText>
                         <div class="models-preview-diff">
                           <code>{{ editChangePreview?.modelDiff.beforeCount || 0 }}</code>
                           <span class="models-preview-arrow">→</span>
@@ -2130,7 +2149,7 @@ function handleCreateProviderClick() {
                       </div>
 
                       <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.inputDiff.changed }">
-                        <NText depth="3" class="models-preview-label">输入类型</NText>
+                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.inputTypes') }}</NText>
                         <div class="models-preview-diff models-preview-diff--block">
                           <code>{{ editChangePreview?.inputDiff.before.join(', ') || '-' }}</code>
                           <span class="models-preview-arrow">→</span>
@@ -2145,26 +2164,31 @@ function handleCreateProviderClick() {
                           :type="editChangePreview?.apiKeyAction === 'overwrite' ? 'warning' : 'default'"
                           :bordered="false"
                         >
-                          {{ editChangePreview?.apiKeyAction === 'overwrite' ? '覆盖线上 Key' : '保持不变' }}
+                          {{ editChangePreview?.apiKeyAction === 'overwrite'
+                            ? t('pages.models.preview.apiKeyOverwrite')
+                            : t('pages.models.preview.apiKeyKeep') }}
                         </NTag>
                       </div>
 
                       <div class="models-preview-card" :class="{ 'is-changed': !!editChangePreview?.inferredPrimary }">
-                        <NText depth="3" class="models-preview-label">默认模型</NText>
+                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.primaryModel') }}</NText>
                         <NTag size="small" :type="editChangePreview?.inferredPrimary ? 'warning' : 'default'" :bordered="false">
-                          {{ editChangePreview?.inferredPrimary || '不变' }}
+                          {{ editChangePreview?.inferredPrimary || t('pages.models.preview.unchanged') }}
                         </NTag>
                       </div>
                     </div>
 
                     <NCollapse v-if="editChangePreview?.modelDiff.changed">
                       <NCollapseItem
-                        :title="`模型变更详情（+${editChangePreview?.modelDiff.added.length || 0} / -${editChangePreview?.modelDiff.removed.length || 0}）`"
+                        :title="t('pages.models.preview.modelDiffTitle', {
+                          added: editChangePreview?.modelDiff.added.length || 0,
+                          removed: editChangePreview?.modelDiff.removed.length || 0,
+                        })"
                         name="edit-model-diff"
                       >
                         <NSpace vertical :size="8">
                           <div v-if="editChangePreview?.modelDiff.added.length">
-                            <NText depth="3" style="font-size: 12px;">新增模型</NText>
+                            <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.addedModels') }}</NText>
                             <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
                               <NTag
                                 v-for="id in editChangePreview?.modelDiff.added"
@@ -2178,7 +2202,7 @@ function handleCreateProviderClick() {
                             </NSpace>
                           </div>
                           <div v-if="editChangePreview?.modelDiff.removed.length">
-                            <NText depth="3" style="font-size: 12px;">移除模型</NText>
+                            <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.removedModels') }}</NText>
                             <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
                               <NTag
                                 v-for="id in editChangePreview?.modelDiff.removed"
@@ -2196,7 +2220,7 @@ function handleCreateProviderClick() {
                     </NCollapse>
 
                     <div class="models-preview-paths">
-                      <NText depth="3" style="font-size: 12px;">将写入路径</NText>
+                      <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.patchPaths') }}</NText>
                       <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
                         <NTag
                           v-for="path in editChangePreview?.patchPaths || []"
@@ -2216,11 +2240,11 @@ function handleCreateProviderClick() {
                     </NAlert>
 
                     <NAlert v-if="editChangePreview && !editChangePreview.hasChanges" type="info" :bordered="false">
-                      当前未检测到配置差异，保存按钮已禁用。
+                      {{ t('pages.models.preview.noChangesHint') }}
                     </NAlert>
 
                     <NSpace justify="space-between">
-                      <NButton @click="editActiveTab = 'models'">上一步</NButton>
+                      <NButton @click="editActiveTab = 'models'">{{ t('pages.models.actions.prev') }}</NButton>
                       <NButton
                         type="primary"
                         :loading="configStore.saving"
@@ -2236,17 +2260,17 @@ function handleCreateProviderClick() {
               </NTabs>
 
               <NCollapse v-if="selectedProviderRawText" style="margin-top: 12px;">
-                <NCollapseItem title="查看当前渠道原始配置（Key 已脱敏）" name="provider-raw-json">
+                <NCollapseItem :title="t('pages.models.editor.rawConfigTitle')" name="provider-raw-json">
                   <NCode :code="selectedProviderRawText" language="json" style="font-size: 12px;" />
                 </NCollapseItem>
               </NCollapse>
             </template>
 
-            <NEmpty v-else description="请从左侧选择一个已配置渠道进行编辑">
+            <NEmpty v-else :description="t('pages.models.editor.empty')">
               <template #extra>
                 <NButton size="small" type="primary" @click="handleNewProvider">
                   <template #icon><NIcon :component="AddOutline" /></template>
-                  新建渠道
+                  {{ t('pages.models.actions.createProvider') }}
                 </NButton>
               </template>
             </NEmpty>
@@ -2258,61 +2282,61 @@ function handleCreateProviderClick() {
     <NModal
       v-model:show="showCreateProviderModal"
       preset="card"
-      title="新建渠道"
+      :title="t('pages.models.createModal.title')"
       style="max-width: 720px; width: 92vw;"
       :mask-closable="false"
     >
       <NAlert type="default" :bordered="false" style="margin-bottom: 12px;">
-        新建流程：填写基础信息 -> 探测/确认模型 -> 查看保存预览 -> 创建渠道。
+        {{ t('pages.models.createModal.flowHint') }}
       </NAlert>
 
       <NTabs v-model:value="createActiveTab" type="line" animated>
-        <NTabPane name="basic" tab="1. 基本信息">
+        <NTabPane name="basic" :tab="t('pages.models.tabs.basic')">
           <NForm label-placement="left" label-width="100">
-            <NFormItem label="渠道 ID">
-              <NInput v-model:value="createProviderForm.id" placeholder="例如：moonshot / openrouter / myproxy" />
+            <NFormItem :label="t('pages.models.form.providerId')">
+              <NInput v-model:value="createProviderForm.id" :placeholder="t('pages.models.form.providerIdPlaceholder')" />
             </NFormItem>
-            <NFormItem label="API 协议">
+            <NFormItem :label="t('pages.models.form.apiProtocol')">
               <NSelect v-model:value="createProviderForm.api" :options="apiOptions" />
             </NFormItem>
-            <NFormItem label="Base URL">
-              <NInput v-model:value="createProviderForm.baseUrl" placeholder="例如：https://api.openai.com/v1" />
+            <NFormItem :label="t('pages.models.form.baseUrl')">
+              <NInput v-model:value="createProviderForm.baseUrl" :placeholder="t('pages.models.form.baseUrlPlaceholder')" />
             </NFormItem>
-            <NFormItem label="API Key">
+            <NFormItem :label="t('pages.models.form.apiKey')">
               <NInput
                 v-model:value="createProviderForm.apiKey"
                 type="password"
                 show-password-on="click"
-                placeholder="新建渠道必须填写 API Key"
+                :placeholder="t('pages.models.form.apiKeyPlaceholderCreateRequired')"
               />
             </NFormItem>
             <NFormItem>
               <NSpace justify="end" style="width: 100%;">
-                <NButton type="primary" @click="createActiveTab = 'models'">下一步：模型管理</NButton>
+                <NButton type="primary" @click="createActiveTab = 'models'">{{ t('pages.models.actions.nextToModels') }}</NButton>
               </NSpace>
             </NFormItem>
           </NForm>
         </NTabPane>
 
-        <NTabPane name="models" tab="2. 模型管理">
+        <NTabPane name="models" :tab="t('pages.models.tabs.models')">
           <NForm label-placement="left" label-width="100">
-            <NFormItem label="输入类型">
+            <NFormItem :label="t('pages.models.form.modelInputTypes')">
               <NSelect
                 v-model:value="createProviderForm.modelInputTypes"
                 :options="modelInputTypeOptions"
                 multiple
-                placeholder="选择该渠道模型支持的输入类型（可多选）"
+                :placeholder="t('pages.models.form.modelInputTypesPlaceholder')"
               />
             </NFormItem>
-            <NFormItem label="模型列表">
+            <NFormItem :label="t('pages.models.form.models')">
               <NInput
                 v-model:value="createProviderForm.modelIdsText"
                 type="textarea"
                 :autosize="{ minRows: 5, maxRows: 10 }"
-                placeholder="一行一个模型 ID；可点击“探测模型”自动填充"
+                :placeholder="t('pages.models.form.modelsPlaceholder')"
               />
             </NFormItem>
-            <NFormItem v-if="createCurrentModelIds.length" label="已识别">
+            <NFormItem v-if="createCurrentModelIds.length" :label="t('pages.models.form.detectedModels')">
               <NSpace :size="6" style="flex-wrap: wrap;">
                 <NTag
                   v-for="id in createCurrentModelIds.slice(0, 20)"
@@ -2323,19 +2347,19 @@ function handleCreateProviderClick() {
                   {{ id }}
                 </NTag>
                 <NText depth="3" v-if="createCurrentModelIds.length > 20">
-                  共 {{ createCurrentModelIds.length }} 个模型
+                  {{ t('pages.models.form.modelsCount', { count: createCurrentModelIds.length }) }}
                 </NText>
               </NSpace>
             </NFormItem>
             <NFormItem>
               <NSpace justify="space-between" style="width: 100%;">
-                <NButton @click="createActiveTab = 'basic'">上一步</NButton>
+                <NButton @click="createActiveTab = 'basic'">{{ t('pages.models.actions.prev') }}</NButton>
                 <NSpace>
                   <NButton :loading="probingCreateProvider" @click="handleProbeCreateProviderModels">
                     <template #icon><NIcon :component="SearchOutline" /></template>
-                    探测模型
+                    {{ t('pages.models.actions.probeModels') }}
                   </NButton>
-                  <NButton type="primary" @click="createActiveTab = 'preview'">下一步：保存预览</NButton>
+                  <NButton type="primary" @click="createActiveTab = 'preview'">{{ t('pages.models.actions.nextToPreview') }}</NButton>
                 </NSpace>
               </NSpace>
             </NFormItem>
@@ -2345,18 +2369,18 @@ function handleCreateProviderClick() {
           </NAlert>
         </NTabPane>
 
-        <NTabPane name="preview" tab="3. 保存预览">
+        <NTabPane name="preview" :tab="t('pages.models.tabs.preview')">
           <NSpace vertical :size="8">
             <div class="models-preview-grid">
               <div class="models-preview-card" :class="{ 'is-changed': !!createChangePreview.providerId }">
-                <NText depth="3" class="models-preview-label">渠道 ID</NText>
+                <NText depth="3" class="models-preview-label">{{ t('pages.models.form.providerId') }}</NText>
                 <NTag size="small" :type="createChangePreview.providerExists ? 'error' : 'info'" :bordered="false">
-                  {{ createChangePreview.providerId || '未填写' }}
+                  {{ createChangePreview.providerId || t('pages.models.preview.notProvided') }}
                 </NTag>
               </div>
 
               <div class="models-preview-card">
-                <NText depth="3" class="models-preview-label">API 协议</NText>
+                <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.apiProtocol') }}</NText>
                 <code>{{ createChangePreview.api }}</code>
               </div>
 
@@ -2366,32 +2390,32 @@ function handleCreateProviderClick() {
               </div>
 
               <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.modelIds.length > 0 }">
-                <NText depth="3" class="models-preview-label">模型数量</NText>
+                <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.models') }}</NText>
                 <code>{{ createChangePreview.modelIds.length }}</code>
               </div>
 
               <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.inputTypes.length > 0 }">
-                <NText depth="3" class="models-preview-label">输入类型</NText>
+                <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.inputTypes') }}</NText>
                 <code>{{ createChangePreview.inputTypes.join(', ') }}</code>
               </div>
 
               <div class="models-preview-card" :class="{ 'is-changed': createChangePreview.hasApiKey }">
                 <NText depth="3" class="models-preview-label">API Key</NText>
                 <NTag size="small" :type="createChangePreview.hasApiKey ? 'warning' : 'error'" :bordered="false">
-                  {{ createChangePreview.hasApiKey ? '将写入（不回显）' : '未填写' }}
+                  {{ createChangePreview.hasApiKey ? t('pages.models.preview.willWriteMasked') : t('pages.models.preview.notProvided') }}
                 </NTag>
               </div>
 
               <div class="models-preview-card" :class="{ 'is-changed': !!createChangePreview.inferredPrimary }">
-                <NText depth="3" class="models-preview-label">默认模型</NText>
+                <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.primaryModel') }}</NText>
                 <NTag size="small" :type="createChangePreview.inferredPrimary ? 'warning' : 'default'" :bordered="false">
-                  {{ createChangePreview.inferredPrimary || '不变' }}
+                  {{ createChangePreview.inferredPrimary || t('pages.models.preview.unchanged') }}
                 </NTag>
               </div>
             </div>
 
             <NCollapse v-if="createChangePreview.modelIds.length > 0">
-              <NCollapseItem :title="`模型列表（${createChangePreview.modelIds.length}）`" name="create-model-list">
+              <NCollapseItem :title="t('pages.models.preview.modelsListTitle', { count: createChangePreview.modelIds.length })" name="create-model-list">
                 <NSpace :size="6" style="flex-wrap: wrap;">
                   <NTag
                     v-for="id in createChangePreview.modelIds"
@@ -2406,7 +2430,7 @@ function handleCreateProviderClick() {
             </NCollapse>
 
             <div class="models-preview-paths">
-              <NText depth="3" style="font-size: 12px;">将写入路径</NText>
+              <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.patchPaths') }}</NText>
               <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
                 <NTag
                   v-for="path in createChangePreview.patchPaths"
@@ -2426,11 +2450,13 @@ function handleCreateProviderClick() {
             </NAlert>
 
             <NAlert v-if="!createChangePreview.ready" type="info" :bordered="false">
-              需补全必填项后才可创建：{{ createChangePreview.missingRequired.join('、') || '无' }}。
+              {{ t('pages.models.preview.missingRequired', {
+                fields: joinDisplayList(createChangePreview.missingRequired) || t('pages.models.preview.none'),
+              }) }}
             </NAlert>
 
             <NSpace justify="space-between">
-              <NButton @click="createActiveTab = 'models'">上一步</NButton>
+              <NButton @click="createActiveTab = 'models'">{{ t('pages.models.actions.prev') }}</NButton>
               <NButton
                 type="primary"
                 :loading="configStore.saving"
@@ -2438,7 +2464,7 @@ function handleCreateProviderClick() {
                 @click="handleCreateProviderClick"
               >
                 <template #icon><NIcon :component="SaveOutline" /></template>
-                创建渠道
+                {{ t('pages.models.actions.createProvider') }}
               </NButton>
             </NSpace>
           </NSpace>
@@ -2447,7 +2473,7 @@ function handleCreateProviderClick() {
 
       <template #footer>
         <NSpace justify="end">
-          <NButton @click="showCreateProviderModal = false">取消</NButton>
+          <NButton @click="showCreateProviderModal = false">{{ t('common.cancel') }}</NButton>
         </NSpace>
       </template>
     </NModal>
@@ -2461,44 +2487,49 @@ function handleCreateProviderClick() {
     >
       <NSpace vertical :size="12">
         <NAlert type="warning" :bordered="false">
-          请确认下列变更将写入配置文件。确认后会立即调用 <code>config.patch</code>。
+          {{ t('pages.models.confirm.warningPrefix') }}<code>config.patch</code>{{ t('pages.models.confirm.warningSuffix') }}
         </NAlert>
 
         <template v-if="confirmActionType === 'edit' && editChangePreview">
           <NDescriptions bordered :column="1" size="small" label-placement="left">
-            <NDescriptionsItem label="编辑渠道">
+            <NDescriptionsItem :label="t('pages.models.confirm.editProvider')">
               <NTag size="small" type="info" :bordered="false">
                 {{ editChangePreview.providerId }}
               </NTag>
             </NDescriptionsItem>
-            <NDescriptionsItem label="API 协议">
+            <NDescriptionsItem :label="t('pages.models.form.apiProtocol')">
               {{ editChangePreview.apiDiff.before }} -> {{ editChangePreview.apiDiff.after }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="Base URL">
+            <NDescriptionsItem :label="t('pages.models.form.baseUrl')">
               {{ editChangePreview.baseUrlDiff.before }} -> {{ editChangePreview.baseUrlDiff.after }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="模型数量">
+            <NDescriptionsItem :label="t('pages.models.preview.models')">
               {{ editChangePreview.modelDiff.beforeCount }} -> {{ editChangePreview.modelDiff.afterCount }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="输入类型">
+            <NDescriptionsItem :label="t('pages.models.preview.inputTypes')">
               {{ editChangePreview.inputDiff.before.join(', ') || '-' }} -> {{ editChangePreview.inputDiff.after.join(', ') || '-' }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="API Key">
-              {{ editChangePreview.apiKeyAction === 'overwrite' ? '覆盖线上 Key' : '保持不变' }}
+            <NDescriptionsItem :label="t('pages.models.form.apiKey')">
+              {{ editChangePreview.apiKeyAction === 'overwrite'
+                ? t('pages.models.preview.apiKeyOverwrite')
+                : t('pages.models.preview.apiKeyKeep') }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="默认模型">
-              {{ editChangePreview.inferredPrimary || '不变' }}
+            <NDescriptionsItem :label="t('pages.models.preview.primaryModel')">
+              {{ editChangePreview.inferredPrimary || t('pages.models.preview.unchanged') }}
             </NDescriptionsItem>
           </NDescriptions>
 
           <NCollapse v-if="editChangePreview.modelDiff.changed">
             <NCollapseItem
-              :title="`模型差异（+${editChangePreview.modelDiff.added.length} / -${editChangePreview.modelDiff.removed.length}）`"
+              :title="t('pages.models.confirm.modelDiffTitle', {
+                added: editChangePreview.modelDiff.added.length,
+                removed: editChangePreview.modelDiff.removed.length,
+              })"
               name="confirm-edit-models"
             >
               <NSpace vertical :size="8">
                 <div v-if="editChangePreview.modelDiff.added.length">
-                  <NText depth="3" style="font-size: 12px;">新增模型</NText>
+                  <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.addedModels') }}</NText>
                   <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
                     <NTag
                       v-for="id in editChangePreview.modelDiff.added"
@@ -2512,7 +2543,7 @@ function handleCreateProviderClick() {
                   </NSpace>
                 </div>
                 <div v-if="editChangePreview.modelDiff.removed.length">
-                  <NText depth="3" style="font-size: 12px;">移除模型</NText>
+                  <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.removedModels') }}</NText>
                   <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
                     <NTag
                       v-for="id in editChangePreview.modelDiff.removed"
@@ -2530,39 +2561,39 @@ function handleCreateProviderClick() {
           </NCollapse>
 
           <NText depth="3" style="font-size: 12px;">
-            将写入路径：{{ editChangePreview.patchPaths.join('，') }}
+            {{ t('pages.models.preview.patchPathsWithValue', { paths: editChangePreview.patchPaths.join(', ') }) }}
           </NText>
         </template>
 
         <template v-else>
           <NDescriptions bordered :column="1" size="small" label-placement="left">
-            <NDescriptionsItem label="创建渠道">
+            <NDescriptionsItem :label="t('pages.models.confirm.createProvider')">
               <NTag size="small" type="info" :bordered="false">
-                {{ createChangePreview.providerId || '未填写' }}
+                {{ createChangePreview.providerId || t('pages.models.preview.notProvided') }}
               </NTag>
             </NDescriptionsItem>
-            <NDescriptionsItem label="API 协议">
+            <NDescriptionsItem :label="t('pages.models.form.apiProtocol')">
               {{ createChangePreview.api }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="Base URL">
+            <NDescriptionsItem :label="t('pages.models.form.baseUrl')">
               {{ createChangePreview.baseUrl }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="模型数量">
+            <NDescriptionsItem :label="t('pages.models.preview.models')">
               {{ createChangePreview.modelIds.length }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="输入类型">
+            <NDescriptionsItem :label="t('pages.models.preview.inputTypes')">
               {{ createChangePreview.inputTypes.join(', ') }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="API Key">
-              {{ createChangePreview.hasApiKey ? '将写入（不回显）' : '未填写' }}
+            <NDescriptionsItem :label="t('pages.models.form.apiKey')">
+              {{ createChangePreview.hasApiKey ? t('pages.models.preview.willWriteMasked') : t('pages.models.preview.notProvided') }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="默认模型">
-              {{ createChangePreview.inferredPrimary || '不变' }}
+            <NDescriptionsItem :label="t('pages.models.preview.primaryModel')">
+              {{ createChangePreview.inferredPrimary || t('pages.models.preview.unchanged') }}
             </NDescriptionsItem>
           </NDescriptions>
 
           <NCollapse v-if="createChangePreview.modelIds.length > 0">
-            <NCollapseItem :title="`模型列表（${createChangePreview.modelIds.length}）`" name="confirm-create-models">
+            <NCollapseItem :title="t('pages.models.preview.modelsListTitle', { count: createChangePreview.modelIds.length })" name="confirm-create-models">
               <NSpace :size="6" style="flex-wrap: wrap;">
                 <NTag
                   v-for="id in createChangePreview.modelIds"
@@ -2577,7 +2608,7 @@ function handleCreateProviderClick() {
           </NCollapse>
 
           <NText depth="3" style="font-size: 12px;">
-            将写入路径：{{ createChangePreview.patchPaths.join('，') || '-' }}
+            {{ t('pages.models.preview.patchPathsWithValue', { paths: createChangePreview.patchPaths.join(', ') || '-' }) }}
           </NText>
         </template>
 
@@ -2595,7 +2626,7 @@ function handleCreateProviderClick() {
 
       <template #footer>
         <NSpace justify="end">
-          <NButton @click="showSaveConfirmModal = false">取消</NButton>
+          <NButton @click="showSaveConfirmModal = false">{{ t('common.cancel') }}</NButton>
           <NButton
             type="primary"
             :loading="configStore.saving"
@@ -2608,9 +2639,9 @@ function handleCreateProviderClick() {
       </template>
     </NModal>
 
-    <NCard title="模型索引" class="models-index-card">
+    <NCard :title="t('pages.models.index.title')" class="models-index-card">
       <NText depth="3" style="font-size: 12px;">
-        已配置模型（来自 openclaw.json）。可在列表中快速将任意模型设为默认。
+        {{ t('pages.models.index.hint') }}
       </NText>
 
       <NDataTable
@@ -2626,11 +2657,11 @@ function handleCreateProviderClick() {
 
       <NEmpty
         v-if="!configStore.loading && configuredModelRows.length === 0"
-        description="当前未配置任何模型"
+        :description="t('pages.models.index.empty')"
         class="models-empty"
       >
         <template #extra>
-          <NText depth="3">请先在上方渠道工作台中填写或探测模型并保存</NText>
+          <NText depth="3">{{ t('pages.models.index.emptyHint') }}</NText>
         </template>
       </NEmpty>
     </NCard>

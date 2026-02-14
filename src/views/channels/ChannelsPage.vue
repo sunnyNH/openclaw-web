@@ -27,6 +27,7 @@ import {
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { faQq } from '@fortawesome/free-brands-svg-icons'
+import { useI18n } from 'vue-i18n'
 import {
   faCircleCheck,
   faBuilding,
@@ -42,47 +43,47 @@ import { maskSecretValue } from '@/utils/secret-mask'
 
 interface ChinaChannelMeta {
   key: 'qqbot' | 'feishu' | 'dingtalk' | 'wecom'
-  label: string
   icon: IconDefinition
-  description: string
   pluginPackages: string[]
   pluginIds: string[]
   guideUrl: string
 }
 
+interface ChannelCard extends ChinaChannelMeta {
+  channelKey: string
+  label: string
+  description: string
+  pluginStatusKnown: boolean
+  pluginInstalled: boolean
+  configured: boolean
+  visibleSecretKeys: string[]
+}
+
 const CHINA_CHANNELS: ChinaChannelMeta[] = [
   {
     key: 'qqbot',
-    label: 'QQ',
     icon: faQq,
-    description: '面向 QQ 群与私聊场景，推荐仅配置 appId、clientSecret 与 markdownSupport。',
     pluginPackages: ['@openclaw-china/qqbot'],
     pluginIds: ['qqbot'],
     guideUrl: 'https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/qqbot/configuration.md',
   },
   {
     key: 'feishu',
-    label: '飞书',
     icon: faPaperPlane,
-    description: '适用于飞书企业协作场景。',
     pluginPackages: ['@openclaw-china/feishu-china', '@openclaw/feishu'],
     pluginIds: ['feishu', 'feishu-china'],
     guideUrl: 'https://github.com/openclaw/openclaw/blob/main/docs/zh-CN/channels/feishu.md',
   },
   {
     key: 'dingtalk',
-    label: '钉钉',
     icon: faComments,
-    description: '覆盖钉钉机器人接入场景，推荐仅配置 clientId 与 clientSecret。',
     pluginPackages: ['@openclaw-china/dingtalk'],
     pluginIds: ['dingtalk'],
     guideUrl: 'https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/dingtalk/configuration.md',
   },
   {
     key: 'wecom',
-    label: '企业微信',
     icon: faBuilding,
-    description: '支持企业微信应用号接入场景。',
     pluginPackages: ['@openclaw-china/wecom', '@openclaw-china/wecom-app'],
     pluginIds: ['wecom', 'wecom-app'],
     guideUrl: 'https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/wecom/configuration.md',
@@ -91,6 +92,7 @@ const CHINA_CHANNELS: ChinaChannelMeta[] = [
 
 const channelStore = useChannelManagementStore()
 const message = useMessage()
+const { t } = useI18n()
 
 const expandedChannelKeys = ref<string[]>([])
 const installLoading = ref<Record<string, boolean>>({})
@@ -124,9 +126,9 @@ function pluginStatusType(card: { pluginStatusKnown: boolean; pluginInstalled: b
 
 function pluginStatusLabel(card: { pluginStatusKnown: boolean; pluginInstalled: boolean }): string {
   if (card.pluginStatusKnown) {
-    return card.pluginInstalled ? '插件已安装' : '插件未安装'
+    return card.pluginInstalled ? t('pages.channels.pluginStatus.installed') : t('pages.channels.pluginStatus.notInstalled')
   }
-  return card.pluginInstalled ? '推断已安装' : '插件状态未知'
+  return card.pluginInstalled ? t('pages.channels.pluginStatus.assumedInstalled') : t('pages.channels.pluginStatus.unknown')
 }
 
 function resolveManagedChannelKey(focusKey: ChinaChannelMeta['key']): string {
@@ -151,6 +153,8 @@ const channelCards = computed(() => {
   const installStatusKnown = channelStore.pluginRpcSupported || channelStore.runtimeChannels.length > 0
 
   return CHINA_CHANNELS.map((meta) => {
+    const label = t(`pages.channels.channels.${meta.key}.label`)
+    const description = t(`pages.channels.channels.${meta.key}.description`)
     const channelKey = resolveManagedChannelKey(meta.key)
     const pluginInstalled = channelStore.isPluginInstalled(meta.pluginPackages, {
       channelKey,
@@ -167,6 +171,8 @@ const channelCards = computed(() => {
 
     return {
       ...meta,
+      label,
+      description,
       channelKey,
       pluginStatusKnown: installStatusKnown,
       pluginInstalled,
@@ -234,8 +240,8 @@ function buildPluginInstallCommands(pluginPackages: string[]): string[] {
   return pluginPackages.map((pluginPackage) => `openclaw plugins install ${pluginPackage}`)
 }
 
-async function installChannel(meta: ChinaChannelMeta): Promise<void> {
-  const channelKey = resolveManagedChannelKey(meta.key)
+async function installChannel(meta: ChannelCard): Promise<void> {
+  const channelKey = meta.channelKey || resolveManagedChannelKey(meta.key)
   installLoading.value[channelKey] = true
   try {
     let installedPluginName = ''
@@ -251,16 +257,16 @@ async function installChannel(meta: ChinaChannelMeta): Promise<void> {
     refreshExpandedPanels()
 
     if (installedPluginName) {
-      message.success(`${meta.label} 已远程安装 ${installedPluginName} 并生成配置草稿，请保存并应用`)
+      message.success(t('pages.channels.installSuccessWithPlugin', { channel: meta.label || meta.key, plugin: installedPluginName }))
     } else {
-      message.success(`${meta.label} 插件已安装，已生成配置草稿，请保存并应用`)
+      message.success(t('pages.channels.installSuccess', { channel: meta.label || meta.key }))
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '安装失败'
+    const errorMessage = error instanceof Error ? error.message : t('pages.channels.installFailed')
     if (/unknown method/i.test(errorMessage) || /method not found/i.test(errorMessage)) {
-      message.error(`${meta.label} 当前 Gateway 不支持 WS 远程安装，请在服务器执行命令安装后再刷新`)
+      message.error(t('pages.channels.remoteInstallUnsupported', { channel: meta.label || meta.key }))
     } else {
-      message.error(`${meta.label} 远程安装失败：${errorMessage}`)
+      message.error(t('pages.channels.remoteInstallFailed', { channel: meta.label || meta.key, error: errorMessage }))
     }
   } finally {
     installLoading.value[channelKey] = false
@@ -272,7 +278,7 @@ async function handleRefresh(): Promise<void> {
     await channelStore.refreshAll()
     refreshExpandedPanels()
   } catch {
-    message.error('读取频道状态失败')
+    message.error(t('pages.channels.refreshFailed'))
   }
 }
 
@@ -280,12 +286,12 @@ async function handleSave(applyAfterSave = false): Promise<void> {
   try {
     const patches = await channelStore.saveChannels({ apply: applyAfterSave })
     if (patches.length === 0) {
-      message.info('没有检测到配置变更')
+      message.info(t('pages.channels.noChanges'))
       return
     }
-    message.success(applyAfterSave ? '配置已保存并应用' : '配置已保存')
+    message.success(applyAfterSave ? t('pages.channels.savedAndApplied') : t('pages.channels.saved'))
   } catch {
-    message.error(applyAfterSave ? '保存并应用失败' : '保存失败')
+    message.error(applyAfterSave ? t('pages.channels.saveAndApplyFailed') : t('common.saveFailed'))
   }
 }
 
@@ -296,12 +302,12 @@ onMounted(() => {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="频道管理" class="channel-root-card">
+    <NCard :title="t('pages.channels.title')" class="channel-root-card">
       <template #header-extra>
         <NSpace :size="10" class="toolbar-actions">
           <NButton size="small" class="toolbar-btn toolbar-btn--refresh" @click="handleRefresh">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新
+            {{ t('common.refresh') }}
           </NButton>
           <NButton
             size="small"
@@ -312,7 +318,7 @@ onMounted(() => {
             @click="handleSave(false)"
           >
             <template #icon><NIcon :component="SaveOutline" /></template>
-            保存
+            {{ t('common.save') }}
           </NButton>
           <NButton
             size="small"
@@ -322,7 +328,7 @@ onMounted(() => {
             @click="handleSave(true)"
           >
             <template #icon><NIcon :component="PlayOutline" /></template>
-            保存并应用
+            {{ t('common.saveAndApply') }}
           </NButton>
         </NSpace>
       </template>
@@ -334,7 +340,7 @@ onMounted(() => {
               <FontAwesomeIcon :icon="faCircleCheck" />
             </span>
             <span>
-              感谢
+              {{ t('pages.channels.thanks.prefix') }}
               <a
                 href="https://github.com/BytePioneer-AI/openclaw-china"
                 target="_blank"
@@ -343,14 +349,14 @@ onMounted(() => {
               >
                 openclaw-china
               </a>
-              为中国渠道生态提供扩展支持。各渠道官方教学可通过下方链接直接访问。
+              {{ t('pages.channels.thanks.suffix') }}
             </span>
           </div>
           <span class="guide-pill-row">
-            <a class="guide-pill" href="https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/qqbot/configuration.md" target="_blank" rel="noopener noreferrer">QQ 教学</a>
-            <a class="guide-pill" href="https://github.com/openclaw/openclaw/blob/main/docs/zh-CN/channels/feishu.md" target="_blank" rel="noopener noreferrer">飞书 教学</a>
-            <a class="guide-pill" href="https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/dingtalk/configuration.md" target="_blank" rel="noopener noreferrer">钉钉 教学</a>
-            <a class="guide-pill" href="https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/wecom/configuration.md" target="_blank" rel="noopener noreferrer">企业微信 教学</a>
+            <a class="guide-pill" href="https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/qqbot/configuration.md" target="_blank" rel="noopener noreferrer">{{ t('pages.channels.guides.qqbot') }}</a>
+            <a class="guide-pill" href="https://github.com/openclaw/openclaw/blob/main/docs/zh-CN/channels/feishu.md" target="_blank" rel="noopener noreferrer">{{ t('pages.channels.guides.feishu') }}</a>
+            <a class="guide-pill" href="https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/dingtalk/configuration.md" target="_blank" rel="noopener noreferrer">{{ t('pages.channels.guides.dingtalk') }}</a>
+            <a class="guide-pill" href="https://github.com/BytePioneer-AI/openclaw-china/blob/main/doc/guides/wecom/configuration.md" target="_blank" rel="noopener noreferrer">{{ t('pages.channels.guides.wecom') }}</a>
           </span>
         </div>
 
@@ -384,7 +390,7 @@ onMounted(() => {
                     size="small"
                     :bordered="false"
                   >
-                    {{ card.configured ? '配置已创建' : '未配置' }}
+                    {{ card.configured ? t('pages.channels.configured') : t('pages.channels.notConfigured') }}
                   </NTag>
                 </NSpace>
               </template>
@@ -393,7 +399,7 @@ onMounted(() => {
                 <div class="channel-desc-panel">
                   <span>{{ card.description }}</span>
                   <a :href="card.guideUrl" target="_blank" rel="noopener noreferrer" class="desc-link">
-                    查看官方教学
+                    {{ t('pages.channels.viewGuide') }}
                   </a>
                 </div>
 
@@ -401,7 +407,7 @@ onMounted(() => {
                   v-if="!card.pluginInstalled || !card.configured"
                   size="small"
                   embedded
-                  title="安装与配置"
+                  :title="t('pages.channels.installCardTitle')"
                 >
                   <NSpace justify="space-between" align="center" class="channel-install-row">
                     <NText depth="3">
@@ -409,10 +415,10 @@ onMounted(() => {
                         !card.pluginInstalled
                           ? (
                               card.pluginStatusKnown
-                                ? `当前未检测到 ${card.label} 插件，点击后将通过当前 WS 连接的 Gateway 远程安装并生成配置草稿。`
-                                : `当前无法通过插件 RPC 确认 ${card.label} 安装态，点击后会尝试远程安装并生成配置草稿。`
+                                ? t('pages.channels.installHint.known', { channel: card.label })
+                                : t('pages.channels.installHint.unknown', { channel: card.label })
                             )
-                          : `当前 ${card.label} 插件已安装，但尚未配置，点击可一键生成最小可用配置草稿。`
+                          : t('pages.channels.installHint.installed', { channel: card.label })
                       }}
                     </NText>
                     <NButton
@@ -421,7 +427,13 @@ onMounted(() => {
                       @click="installChannel(card)"
                     >
                       <template #icon><NIcon :component="AddOutline" /></template>
-                      {{ card.pluginInstalled ? '一键生成配置' : (card.pluginStatusKnown ? '一键安装并配置' : '尝试安装并配置') }}
+                      {{
+                        card.pluginInstalled
+                          ? t('pages.channels.installActions.generateConfig')
+                          : (card.pluginStatusKnown
+                              ? t('pages.channels.installActions.installAndConfig')
+                              : t('pages.channels.installActions.tryInstallAndConfig'))
+                      }}
                     </NButton>
                   </NSpace>
 
@@ -431,7 +443,7 @@ onMounted(() => {
                     :bordered="false"
                     style="margin-top: 10px;"
                   >
-                    若远程安装失败，请登录 Gateway 所在服务器执行以下命令后重试：
+                    {{ t('pages.channels.remoteInstallFallback') }}
                     <div
                       v-for="command in buildPluginInstallCommands(card.pluginPackages)"
                       :key="`${card.channelKey}-${command}`"
@@ -442,29 +454,29 @@ onMounted(() => {
                   </NAlert>
                 </NCard>
 
-                <NCard v-if="card.configured" size="small" title="基础配置" embedded>
+                <NCard v-if="card.configured" size="small" :title="t('pages.channels.basicConfigTitle')" embedded>
                   <NForm label-placement="left" label-width="140" class="channel-config-form">
-                    <NFormItem label="启用渠道">
+                    <NFormItem :label="t('pages.channels.labels.enabled')">
                       <NSwitch
                         :value="channelEnabled(card.channelKey)"
                         @update:value="(value) => updateChannelEnabled(card.channelKey, value)"
                       />
                     </NFormItem>
-                    <NFormItem v-if="card.key === 'qqbot'" label="App ID">
+                    <NFormItem v-if="card.key === 'qqbot'" :label="t('pages.channels.labels.appId')">
                       <NInput
                         :value="channelAppId(card.channelKey)"
-                        placeholder="输入 QQ App ID"
+                        :placeholder="t('pages.channels.placeholders.qqAppId')"
                         @update:value="(value) => updateChannelAppId(card.channelKey, value)"
                       />
                     </NFormItem>
-                    <NFormItem v-if="card.key === 'dingtalk'" label="Client ID">
+                    <NFormItem v-if="card.key === 'dingtalk'" :label="t('pages.channels.labels.clientId')">
                       <NInput
                         :value="channelClientId(card.channelKey)"
-                        placeholder="输入钉钉 Client ID"
+                        :placeholder="t('pages.channels.placeholders.dingtalkClientId')"
                         @update:value="(value) => updateChannelClientId(card.channelKey, value)"
                       />
                     </NFormItem>
-                    <NFormItem v-if="card.key === 'qqbot'" label="Markdown 支持">
+                    <NFormItem v-if="card.key === 'qqbot'" :label="t('pages.channels.labels.markdownSupport')">
                       <NSwitch
                         :value="channelMarkdownSupport(card.channelKey)"
                         @update:value="(value) => updateChannelMarkdownSupport(card.channelKey, value)"
@@ -473,9 +485,9 @@ onMounted(() => {
                   </NForm>
                 </NCard>
 
-                <NCard v-if="card.configured" size="small" title="凭证更新（掩码）" embedded>
+                <NCard v-if="card.configured" size="small" :title="t('pages.channels.credentialsTitle')" embedded>
                   <NAlert type="info" :bordered="false" style="margin-bottom: 12px;">
-                    凭证仅显示掩码。输入新值后会在保存时提交；未输入则保持原值，不会回显明文。
+                    {{ t('pages.channels.credentialsHint') }}
                   </NAlert>
 
                   <NSpace
@@ -483,7 +495,7 @@ onMounted(() => {
                     justify="center"
                     style="padding: 8px 0;"
                   >
-                    <NText depth="3">当前渠道未识别到渠道级凭证字段</NText>
+                    <NText depth="3">{{ t('pages.channels.noSecretFields') }}</NText>
                   </NSpace>
 
                   <NForm v-else label-placement="left" label-width="160" class="channel-secret-form">
@@ -498,7 +510,7 @@ onMounted(() => {
                           type="password"
                           show-password-on="click"
                           :value="readSecretInput(card.channelKey, field)"
-                          placeholder="输入新值（留空不变更）"
+                          :placeholder="t('pages.channels.placeholders.secret')"
                           @update:value="(value) => updateSecretInput(card.channelKey, field, value)"
                         />
                         <NTag
@@ -507,7 +519,7 @@ onMounted(() => {
                           :bordered="false"
                           style="align-self: center;"
                         >
-                          待更新
+                          {{ t('pages.channels.pendingUpdate') }}
                         </NTag>
                       </NInputGroup>
                     </NFormItem>

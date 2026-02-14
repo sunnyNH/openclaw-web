@@ -24,6 +24,7 @@ import {
   RefreshOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import StatCard from '@/components/common/StatCard.vue'
 import { useWebSocketStore } from '@/stores/websocket'
 import { formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
@@ -47,6 +48,7 @@ type UsageMode = 'tokens' | 'cost'
 
 const router = useRouter()
 const wsStore = useWebSocketStore()
+const { t, locale } = useI18n()
 const loading = ref(true)
 const refreshing = ref(false)
 const usageError = ref<string | null>(null)
@@ -89,11 +91,11 @@ const ZERO_USAGE_TOTALS: SessionsUsageTotals = {
 }
 
 const connectionLabel = computed(() => {
-  if (wsStore.state === 'connected') return '网关已连接'
-  if (wsStore.state === 'connecting') return '网关连接中'
-  if (wsStore.state === 'reconnecting') return '网关重连中'
-  if (wsStore.state === 'failed') return '网关连接失败'
-  return '网关未连接'
+  if (wsStore.state === 'connected') return t('pages.dashboard.connection.connected')
+  if (wsStore.state === 'connecting') return t('pages.dashboard.connection.connecting')
+  if (wsStore.state === 'reconnecting') return t('pages.dashboard.connection.reconnecting')
+  if (wsStore.state === 'failed') return t('pages.dashboard.connection.failed')
+  return t('pages.dashboard.connection.disconnected')
 })
 
 const connectionType = computed<'success' | 'warning' | 'error' | 'default'>(() => {
@@ -104,8 +106,8 @@ const connectionType = computed<'success' | 'warning' | 'error' | 'default'>(() 
 })
 
 const lastUpdatedText = computed(() => {
-  if (!lastUpdatedAt.value) return '尚未同步'
-  return `上次同步 ${formatRelativeTime(lastUpdatedAt.value)}`
+  if (!lastUpdatedAt.value) return t('pages.dashboard.lastUpdated.none')
+  return t('pages.dashboard.lastUpdated.text', { time: formatRelativeTime(lastUpdatedAt.value) })
 })
 
 const usageTotals = computed(() =>
@@ -125,8 +127,8 @@ const usageSessionMap = computed(() => {
 const usageCoverageText = computed(() => {
   const total = usageSessions.value.length
   const withUsage = usageSessions.value.filter((item) => item.usage && item.usage.totalTokens > 0).length
-  if (total === 0) return '当前范围暂无 usage 会话'
-  return `有 usage 数据 ${withUsage}/${total} 个会话`
+  if (total === 0) return t('pages.dashboard.usage.coverage.none')
+  return t('pages.dashboard.usage.coverage.text', { withUsage, total })
 })
 
 const tokenTotalDisplay = computed(() => formatCompactNumber(usageTotals.value.totalTokens))
@@ -136,18 +138,18 @@ const usageSegments = computed(() => {
   const totals = usageTotals.value
   if (usageMode.value === 'tokens') {
     return [
-      { key: 'input', label: '输入', value: totals.input, color: '#2a7fff' },
-      { key: 'output', label: '输出', value: totals.output, color: '#18a058' },
-      { key: 'cacheRead', label: '缓存读', value: totals.cacheRead, color: '#13c2c2' },
-      { key: 'cacheWrite', label: '缓存写', value: totals.cacheWrite, color: '#f0a020' },
+      { key: 'input', label: t('pages.dashboard.usage.segments.input'), value: totals.input, color: '#2a7fff' },
+      { key: 'output', label: t('pages.dashboard.usage.segments.output'), value: totals.output, color: '#18a058' },
+      { key: 'cacheRead', label: t('pages.dashboard.usage.segments.cacheRead'), value: totals.cacheRead, color: '#13c2c2' },
+      { key: 'cacheWrite', label: t('pages.dashboard.usage.segments.cacheWrite'), value: totals.cacheWrite, color: '#f0a020' },
     ]
   }
 
   return [
-    { key: 'inputCost', label: '输入成本', value: totals.inputCost, color: '#2a7fff' },
-    { key: 'outputCost', label: '输出成本', value: totals.outputCost, color: '#18a058' },
-    { key: 'cacheReadCost', label: '缓存读成本', value: totals.cacheReadCost, color: '#13c2c2' },
-    { key: 'cacheWriteCost', label: '缓存写成本', value: totals.cacheWriteCost, color: '#f0a020' },
+    { key: 'inputCost', label: t('pages.dashboard.usage.segments.inputCost'), value: totals.inputCost, color: '#2a7fff' },
+    { key: 'outputCost', label: t('pages.dashboard.usage.segments.outputCost'), value: totals.outputCost, color: '#18a058' },
+    { key: 'cacheReadCost', label: t('pages.dashboard.usage.segments.cacheReadCost'), value: totals.cacheReadCost, color: '#13c2c2' },
+    { key: 'cacheWriteCost', label: t('pages.dashboard.usage.segments.cacheWriteCost'), value: totals.cacheWriteCost, color: '#f0a020' },
   ]
 })
 
@@ -267,39 +269,39 @@ const usageKpis = computed(() => {
   return [
     {
       key: 'messages',
-      label: '消息总量',
+      label: t('pages.dashboard.kpis.messages.label'),
       value: formatCompactNumber(totalMessages),
-      hint: totalMessages > 0 ? `范围内 ${rows.length} 天` : '暂无消息数据',
+      hint: totalMessages > 0 ? t('pages.dashboard.kpis.messages.hint', { days: rows.length }) : t('pages.dashboard.kpis.messages.emptyHint'),
     },
     {
       key: 'tool-calls',
-      label: '工具调用',
+      label: t('pages.dashboard.kpis.toolCalls.label'),
       value: formatCompactNumber(totalToolCalls),
-      hint: totalToolCalls > 0 ? `Top 工具 ${topTools.value[0]?.name || '-'}` : '暂无工具调用',
+      hint: totalToolCalls > 0 ? t('pages.dashboard.kpis.toolCalls.hint', { tool: topTools.value[0]?.name || '-' }) : t('pages.dashboard.kpis.toolCalls.emptyHint'),
     },
     {
       key: 'error-rate',
-      label: '错误率',
+      label: t('pages.dashboard.kpis.errorRate.label'),
       value: `${errorRate.toFixed(errorRate >= 1 ? 1 : 2)}%`,
-      hint: `${formatCompactNumber(totalErrors)} 错误 / ${formatCompactNumber(totalMessages)} 消息`,
+      hint: t('pages.dashboard.kpis.errorRate.hint', { errors: formatCompactNumber(totalErrors), messages: formatCompactNumber(totalMessages) }),
     },
     {
       key: 'avg-token',
-      label: '平均每条消息 Token',
+      label: t('pages.dashboard.kpis.avgTokens.label'),
       value: avgTokensPerMessage > 0 ? formatCompactNumber(avgTokensPerMessage) : '0',
-      hint: '用总 Token / 消息总量计算',
+      hint: t('pages.dashboard.kpis.avgTokens.hint'),
     },
     {
       key: 'cache-read-ratio',
-      label: '缓存读取占比',
+      label: t('pages.dashboard.kpis.cacheReadRatio.label'),
       value: `${cacheReadRatio.toFixed(cacheReadRatio >= 10 ? 1 : 2)}%`,
-      hint: `${formatCompactNumber(totals.cacheRead)} / ${formatCompactNumber(totals.input)} 输入`,
+      hint: t('pages.dashboard.kpis.cacheReadRatio.hint', { cacheRead: formatCompactNumber(totals.cacheRead), input: formatCompactNumber(totals.input) }),
     },
     {
       key: 'active-days',
-      label: '活跃天数',
+      label: t('pages.dashboard.kpis.activeDays.label'),
       value: String(activeDays),
-      hint: `已选范围 ${rows.length} 天`,
+      hint: t('pages.dashboard.kpis.activeDays.hint', { days: rows.length }),
     },
   ]
 })
@@ -371,9 +373,9 @@ const activeSessionUsage = computed(() => {
   return usageSessionMap.value[activeSession.value.key]?.usage || null
 })
 
-const sessionColumns = [
+const sessionColumns = computed(() => ([
   {
-    title: '频道',
+    title: t('pages.dashboard.sessions.columns.channel'),
     key: 'channel',
     width: 100,
     render(row: Session) {
@@ -382,7 +384,7 @@ const sessionColumns = [
     },
   },
   {
-    title: '对话方',
+    title: t('pages.dashboard.sessions.columns.peer'),
     key: 'peer',
     ellipsis: { tooltip: true },
     render(row: Session) {
@@ -391,12 +393,12 @@ const sessionColumns = [
     },
   },
   {
-    title: '消息数',
+    title: t('pages.dashboard.sessions.columns.messages'),
     key: 'messageCount',
     width: 84,
   },
   {
-    title: '用量',
+    title: t('pages.dashboard.sessions.columns.usage'),
     key: 'usage',
     width: 116,
     render(row: Session) {
@@ -408,14 +410,14 @@ const sessionColumns = [
     },
   },
   {
-    title: '最近活动',
+    title: t('pages.dashboard.sessions.columns.lastActivity'),
     key: 'lastActivity',
     width: 132,
     render(row: Session) {
       return row.lastActivity ? formatRelativeTime(row.lastActivity) : '-'
     },
   },
-]
+]))
 
 onMounted(async () => {
   applyRangePreset('7d', false)
@@ -710,14 +712,14 @@ function parseTime(value?: string): number {
 }
 
 function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat('zh-CN', {
+  return new Intl.NumberFormat(locale.value, {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value)
 }
 
 function formatUsd(value: number): string {
-  return new Intl.NumberFormat('zh-CN', {
+  return new Intl.NumberFormat(locale.value, {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
@@ -732,7 +734,7 @@ function formatEventPayload(payload: unknown): string {
   try {
     return truncate(JSON.stringify(payload), 120)
   } catch {
-    return '[payload 无法序列化]'
+    return t('pages.dashboard.events.payloadUnserializable')
   }
 }
 
@@ -789,9 +791,9 @@ function viewModels() {
       <NCard class="dashboard-hero" :bordered="false">
         <div class="dashboard-hero-top">
           <div>
-            <div class="dashboard-hero-title">OpenClaw 运行总览</div>
+            <div class="dashboard-hero-title">{{ t('pages.dashboard.hero.title') }}</div>
             <div class="dashboard-hero-subtitle">
-              用官方 Usage 聚合数据看 token/cost、活跃会话、错误分布，再进入具体会话处理。
+              {{ t('pages.dashboard.hero.subtitle') }}
             </div>
           </div>
           <NSpace :size="8" wrap>
@@ -802,7 +804,7 @@ function viewModels() {
         </div>
 
         <NSpace :size="8" wrap class="dashboard-filters-row">
-          <NButton size="small" :type="rangePreset === 'today' ? 'primary' : 'default'" secondary @click="applyRangePreset('today')">Today</NButton>
+          <NButton size="small" :type="rangePreset === 'today' ? 'primary' : 'default'" secondary @click="applyRangePreset('today')">{{ t('pages.dashboard.range.today') }}</NButton>
           <NButton size="small" :type="rangePreset === '7d' ? 'primary' : 'default'" secondary @click="applyRangePreset('7d')">7d</NButton>
           <NButton size="small" :type="rangePreset === '30d' ? 'primary' : 'default'" secondary @click="applyRangePreset('30d')">30d</NButton>
 
@@ -812,7 +814,7 @@ function viewModels() {
             type="date"
             @change="handleDateRangeChanged"
           />
-          <span class="usage-date-sep">到</span>
+          <span class="usage-date-sep">{{ t('pages.dashboard.range.to') }}</span>
           <input
             v-model="usageEndDate"
             class="usage-date-input"
@@ -820,44 +822,44 @@ function viewModels() {
             @change="handleDateRangeChanged"
           />
 
-          <NButton size="small" :type="usageMode === 'tokens' ? 'primary' : 'default'" secondary @click="usageMode = 'tokens'">Tokens</NButton>
+          <NButton size="small" :type="usageMode === 'tokens' ? 'primary' : 'default'" secondary @click="usageMode = 'tokens'">{{ t('pages.dashboard.usageMode.tokens') }}</NButton>
 
           <NButton type="primary" :loading="refreshing" @click="refreshDashboard">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新
+            {{ t('common.refresh') }}
           </NButton>
           <NButton secondary @click="viewChat">
             <template #icon><NIcon :component="ChatboxEllipsesOutline" /></template>
-            在线对话
+            {{ t('routes.chat') }}
           </NButton>
-          <NButton secondary @click="viewCron">Cron 管理</NButton>
-          <NButton secondary @click="viewModels">Model 管理</NButton>
+          <NButton secondary @click="viewCron">{{ t('routes.cron') }}</NButton>
+          <NButton secondary @click="viewModels">{{ t('routes.models') }}</NButton>
         </NSpace>
 
         <NAlert v-if="usageError" type="warning" :bordered="false" style="margin-top: 10px;">
-          Usage 接口读取失败：{{ usageError }}
+          {{ t('pages.dashboard.usage.error', { error: usageError }) }}
         </NAlert>
       </NCard>
 
       <NGrid cols="1 s:2 m:3 l:5" responsive="screen" :x-gap="12" :y-gap="12">
         <NGridItem>
-          <StatCard title="总会话数" :value="stats.sessionCount" :icon="ChatbubblesOutline" color="#18a058" />
+          <StatCard :title="t('pages.dashboard.stats.sessions')" :value="stats.sessionCount" :icon="ChatbubblesOutline" color="#18a058" />
         </NGridItem>
         <NGridItem>
-          <StatCard title="启用任务" :value="stats.cronCount" :icon="CalendarOutline" color="#f0a020" />
+          <StatCard :title="t('pages.dashboard.stats.cronJobs')" :value="stats.cronCount" :icon="CalendarOutline" color="#f0a020" />
         </NGridItem>
         <NGridItem>
-          <StatCard title="已配置模型" :value="stats.modelCount" :icon="SparklesOutline" color="#2080f0" />
+          <StatCard :title="t('pages.dashboard.stats.models')" :value="stats.modelCount" :icon="SparklesOutline" color="#2080f0" />
         </NGridItem>
         <NGridItem>
-          <StatCard title="已安装技能" :value="stats.installedSkills" :icon="ExtensionPuzzleOutline" color="#8b5cf6" />
+          <StatCard :title="t('pages.dashboard.stats.skills')" :value="stats.installedSkills" :icon="ExtensionPuzzleOutline" color="#8b5cf6" />
         </NGridItem>
         <NGridItem>
-          <StatCard title="总 Token" :value="tokenTotalDisplay" :icon="FlashOutline" color="#d03050" />
+          <StatCard :title="t('pages.dashboard.stats.totalTokens')" :value="tokenTotalDisplay" :icon="FlashOutline" color="#d03050" />
         </NGridItem>
       </NGrid>
 
-      <NCard title="Usage 关键指标" class="dashboard-card">
+      <NCard :title="t('pages.dashboard.cards.kpis')" class="dashboard-card">
         <div class="kpi-grid">
           <div v-for="kpi in usageKpis" :key="kpi.key" class="kpi-card">
             <NText depth="3">{{ kpi.label }}</NText>
@@ -869,7 +871,7 @@ function viewModels() {
 
       <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
         <NGridItem :span="2" class="usage-trend-item">
-          <NCard title="Token 趋势（官方 Usage）" class="dashboard-card usage-trend-card">
+          <NCard :title="t('pages.dashboard.cards.trend')" class="dashboard-card usage-trend-card">
             <template #header-extra>
               <NSpace :size="8" align="center">
                 <NTag size="small" :bordered="false" round type="info">
@@ -923,8 +925,15 @@ function viewModels() {
                     :cy="point.y"
                     r="3.5"
                   >
-                    <title>
-                      {{ point.date }} · {{ formatUsageValue(point.value) }} · 消息 {{ point.messages }} · 错误 {{ point.errors }}
+                      <title>
+                      {{
+                        t('pages.dashboard.trend.pointTitle', {
+                          date: point.date,
+                          value: formatUsageValue(point.value),
+                          messages: point.messages,
+                          errors: point.errors,
+                        })
+                      }}
                     </title>
                   </circle>
                 </svg>
@@ -935,15 +944,15 @@ function viewModels() {
                   <span>{{ trendAxisLabels.end }}</span>
                 </div>
               </template>
-              <div v-else class="daily-empty">当前范围暂无趋势数据</div>
+              <div v-else class="daily-empty">{{ t('pages.dashboard.trend.empty') }}</div>
             </div>
           </NCard>
         </NGridItem>
 
         <NGridItem :span="1" class="usage-structure-item">
-          <NCard title="Usage 结构" class="dashboard-card usage-structure-card">
+          <NCard :title="t('pages.dashboard.cards.structure')" class="dashboard-card usage-structure-card">
             <NSpace justify="space-between" align="center" style="margin-bottom: 8px;">
-              <NText depth="3">{{ usageMode === 'tokens' ? '总 Token' : '总 Cost' }}</NText>
+              <NText depth="3">{{ usageMode === 'tokens' ? t('pages.dashboard.usage.totalTokens') : t('pages.dashboard.usage.totalCost') }}</NText>
               <NText strong>{{ usageMode === 'tokens' ? tokenTotalDisplay : costTotalDisplay }}</NText>
             </NSpace>
 
@@ -970,17 +979,17 @@ function viewModels() {
             </div>
 
             <NText depth="3" style="display: block; margin-top: 8px; font-size: 12px;">
-              缺失成本条目：{{ usageTotals.missingCostEntries }}
+              {{ t('pages.dashboard.usage.missingCostEntries', { count: usageTotals.missingCostEntries }) }}
             </NText>
           </NCard>
         </NGridItem>
       </NGrid>
 
-      <NCard title="Top 分布" class="dashboard-card">
+      <NCard :title="t('pages.dashboard.cards.top')" class="dashboard-card">
         <NGrid cols="1 m:3" responsive="screen" :x-gap="12" :y-gap="12">
           <NGridItem>
             <div class="top-pane-card">
-              <div class="top-title">Top Models</div>
+              <div class="top-title">{{ t('pages.dashboard.top.models') }}</div>
               <div v-if="topModels.length" class="top-list">
                 <div v-for="item in topModels" :key="`${item.provider || '-'}:${item.model || '-'}`" class="top-row">
                   <div class="top-row-main">
@@ -995,13 +1004,13 @@ function viewModels() {
                   </div>
                 </div>
               </div>
-              <div v-else class="top-empty">暂无数据</div>
+              <div v-else class="top-empty">{{ t('common.empty') }}</div>
             </div>
           </NGridItem>
 
           <NGridItem>
             <div class="top-pane-card">
-              <div class="top-title">Top Providers</div>
+              <div class="top-title">{{ t('pages.dashboard.top.providers') }}</div>
               <div v-if="topProviders.length" class="top-list">
                 <div v-for="item in topProviders" :key="item.provider || 'unknown-provider'" class="top-row">
                   <div class="top-row-main">
@@ -1016,13 +1025,13 @@ function viewModels() {
                   </div>
                 </div>
               </div>
-              <div v-else class="top-empty">暂无数据</div>
+              <div v-else class="top-empty">{{ t('common.empty') }}</div>
             </div>
           </NGridItem>
 
           <NGridItem>
             <div class="top-pane-card">
-              <div class="top-title">Top Tools</div>
+              <div class="top-title">{{ t('pages.dashboard.top.tools') }}</div>
               <div v-if="topTools.length" class="top-list">
                 <div v-for="item in topTools" :key="item.name" class="top-row">
                   <div class="top-row-main">
@@ -1037,7 +1046,7 @@ function viewModels() {
                   </div>
                 </div>
               </div>
-              <div v-else class="top-empty">暂无数据</div>
+              <div v-else class="top-empty">{{ t('common.empty') }}</div>
             </div>
           </NGridItem>
         </NGrid>
@@ -1045,9 +1054,9 @@ function viewModels() {
 
       <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
         <NGridItem :span="2">
-          <NCard title="会话概览（带用量）" class="dashboard-card">
+          <NCard :title="t('pages.dashboard.cards.sessions')" class="dashboard-card">
             <template #header-extra>
-              <NButton text @click="viewSessions">查看全部</NButton>
+              <NButton text @click="viewSessions">{{ t('common.viewAll') }}</NButton>
             </template>
 
             <NDataTable
@@ -1066,12 +1075,19 @@ function viewModels() {
                 <div>
                   <NText strong>{{ activeSession.key }}</NText>
                   <NText depth="3" style="display: block; margin-top: 4px;">
-                    模型：{{ activeSession.model || '-' }}，消息：{{ activeSession.messageCount }}，最近：
-                    {{ activeSession.lastActivity ? formatRelativeTime(activeSession.lastActivity) : '-' }}
+                    {{
+                      t('pages.dashboard.sessions.summary', {
+                        model: activeSession.model || '-',
+                        messages: activeSession.messageCount,
+                        last: activeSession.lastActivity ? formatRelativeTime(activeSession.lastActivity) : '-',
+                      })
+                    }}
                   </NText>
                 </div>
                 <div style="text-align: right;">
-                  <NText depth="3" style="display: block;">用量（{{ usageMode }}）</NText>
+                  <NText depth="3" style="display: block;">
+                    {{ t('pages.dashboard.sessions.usageLabel', { mode: usageMode === 'tokens' ? t('pages.dashboard.usageMode.tokensShort') : t('pages.dashboard.usageMode.costShort') }) }}
+                  </NText>
                   <NText strong>
                     {{
                       activeSessionUsage
@@ -1085,7 +1101,7 @@ function viewModels() {
               </NSpace>
               <NSpace justify="end" style="margin-top: 8px;">
                 <NButton size="small" tertiary type="primary" @click="viewSessionDetail(activeSession)">
-                  会话详情
+                  {{ t('pages.sessions.detail.title') }}
                 </NButton>
               </NSpace>
             </div>
@@ -1093,13 +1109,13 @@ function viewModels() {
         </NGridItem>
 
         <NGridItem :span="1">
-          <NCard title="实时事件流" class="dashboard-card">
+          <NCard :title="t('pages.dashboard.cards.events')" class="dashboard-card">
             <template #header-extra>
               <NInput
                 v-model:value="eventKeyword"
                 size="small"
                 clearable
-                placeholder="筛选事件名，如 chat / agent / tool"
+                :placeholder="t('pages.dashboard.events.placeholder')"
                 style="width: 260px;"
               />
             </template>
@@ -1123,7 +1139,7 @@ function viewModels() {
                   {{ formatEventPayload(event.payload) }}
                 </NText>
               </div>
-              <div v-if="filteredEvents.length === 0" class="event-empty">等待事件...</div>
+              <div v-if="filteredEvents.length === 0" class="event-empty">{{ t('pages.dashboard.events.empty') }}</div>
             </div>
           </NCard>
         </NGridItem>

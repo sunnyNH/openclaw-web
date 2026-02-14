@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard,
@@ -21,12 +21,14 @@ import {
   useMessage,
 } from 'naive-ui'
 import { GitNetworkOutline, RefreshOutline, SaveOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '@/stores/config'
 import type { ConfigPatch } from '@/api/types'
 
 const configStore = useConfigStore()
 const message = useMessage()
 const router = useRouter()
+const { t } = useI18n()
 const activeTab = ref('general')
 const rawJsonEdit = ref('')
 
@@ -73,15 +75,15 @@ async function saveGeneralSettings() {
   }
 
   if (patches.length === 0) {
-    message.info('没有需要保存的更改')
+    message.info(t('pages.config.noChanges'))
     return
   }
 
   try {
     await configStore.patchConfig(patches)
-    message.success('配置已保存')
+    message.success(t('pages.config.saved'))
   } catch {
-    message.error('保存失败')
+    message.error(t('common.saveFailed'))
   }
 }
 
@@ -110,9 +112,9 @@ async function saveToolSettings() {
 
   try {
     await configStore.patchConfig(patches)
-    message.success('工具配置已保存')
+    message.success(t('pages.config.toolsSaved'))
   } catch {
-    message.error('保存失败')
+    message.error(t('common.saveFailed'))
   }
 }
 
@@ -148,18 +150,18 @@ async function saveSessionSettings() {
 
   try {
     await configStore.patchConfig(patches)
-    message.success('会话配置已保存')
+    message.success(t('pages.config.sessionsSaved'))
   } catch {
-    message.error('保存失败')
+    message.error(t('common.saveFailed'))
   }
 }
 
 async function handleApply() {
   try {
     await configStore.applyConfig()
-    message.success('配置已应用，Gateway 将重新加载')
+    message.success(t('pages.config.appliedAndReloading'))
   } catch {
-    message.error('应用失败')
+    message.error(t('pages.config.applyFailed'))
   }
 }
 
@@ -171,23 +173,23 @@ const modelOptions = [
   { label: 'GPT-4o Mini', value: 'openai/gpt-4o-mini' },
 ]
 
-const profileOptions = [
-  { label: '最小 (minimal)', value: 'minimal' },
-  { label: '编程 (coding)', value: 'coding' },
-  { label: '完整 (full)', value: 'full' },
-]
+const profileOptions = computed(() => ([
+  { label: t('pages.config.toolProfiles.minimal'), value: 'minimal' },
+  { label: t('pages.config.toolProfiles.coding'), value: 'coding' },
+  { label: t('pages.config.toolProfiles.full'), value: 'full' },
+]))
 
-const resetModeOptions = [
-  { label: '关闭', value: 'off' },
-  { label: '每日重置', value: 'daily' },
-  { label: '空闲重置', value: 'idle' },
-]
+const resetModeOptions = computed(() => ([
+  { label: t('pages.config.resetModes.off'), value: 'off' },
+  { label: t('pages.config.resetModes.daily'), value: 'daily' },
+  { label: t('pages.config.resetModes.idle'), value: 'idle' },
+]))
 
-const queueModeOptions = [
-  { label: '顺序执行', value: 'sequential' },
-  { label: '并发执行', value: 'concurrent' },
-  { label: '批量收集', value: 'collect' },
-]
+const queueModeOptions = computed(() => ([
+  { label: t('pages.config.queueModes.sequential'), value: 'sequential' },
+  { label: t('pages.config.queueModes.concurrent'), value: 'concurrent' },
+  { label: t('pages.config.queueModes.collect'), value: 'collect' },
+]))
 
 function goToChannels() {
   router.push({ name: 'Channels' })
@@ -197,25 +199,25 @@ function goToChannels() {
 <template>
   <NSpin :show="configStore.loading">
     <NSpace vertical :size="16">
-      <NCard title="openclaw.json 管理" class="app-card">
+      <NCard :title="t('pages.config.title')" class="app-card">
         <template #header-extra>
           <NSpace :size="8" class="app-toolbar">
             <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="configStore.fetchConfig()">
               <template #icon><NIcon :component="RefreshOutline" /></template>
-              刷新
+              {{ t('common.refresh') }}
             </NButton>
             <NButton size="small" type="warning" class="app-toolbar-btn app-toolbar-btn--apply" @click="handleApply">
-              应用并重载
+              {{ t('pages.config.applyAndReload') }}
             </NButton>
           </NSpace>
         </template>
 
         <NAlert type="info" :bordered="false" style="margin-top: 12px;">
           <NSpace justify="space-between" align="center">
-            <span>频道账号、策略、认证配对、凭证更新已迁移到频道管理页集中维护，建议从该入口进行日常运维。</span>
+            <span>{{ t('pages.config.channelsMigratedHint') }}</span>
             <NButton size="tiny" type="primary" ghost @click="goToChannels">
               <template #icon><NIcon :component="GitNetworkOutline" /></template>
-              前往频道管理
+              {{ t('pages.config.goToChannels') }}
             </NButton>
           </NSpace>
         </NAlert>
@@ -223,81 +225,81 @@ function goToChannels() {
         <NTabs v-model:value="activeTab" type="line" animated>
 
           <!-- General -->
-          <NTabPane name="general" tab="基本设置">
+          <NTabPane name="general" :tab="t('pages.config.tabs.general')">
             <NForm label-placement="left" label-width="120" style="max-width: 600px; margin-top: 16px;">
-              <NFormItem label="默认模型">
+              <NFormItem :label="t('pages.config.labels.primaryModel')">
                 <NSelect
                   v-model:value="primaryModel"
                   :options="modelOptions"
                   filterable
                   tag
-                  placeholder="选择或输入模型"
+                  :placeholder="t('pages.config.placeholders.model')"
                 />
               </NFormItem>
-              <NFormItem label="Gateway 端口">
+              <NFormItem :label="t('pages.config.labels.gatewayPort')">
                 <NInputNumber v-model:value="gatewayPort" :min="1" :max="65535" />
               </NFormItem>
-              <NFormItem label="工作区路径">
-                <NInput v-model:value="workspace" placeholder="~/.openclaw/workspace" />
+              <NFormItem :label="t('pages.config.labels.workspacePath')">
+                <NInput v-model:value="workspace" :placeholder="t('pages.config.placeholders.workspacePath')" />
               </NFormItem>
               <NFormItem>
                 <NButton type="primary" @click="saveGeneralSettings" :loading="configStore.saving">
                   <template #icon><NIcon :component="SaveOutline" /></template>
-                  保存
+                  {{ t('common.save') }}
                 </NButton>
               </NFormItem>
             </NForm>
           </NTabPane>
 
           <!-- Tools -->
-          <NTabPane name="tools" tab="工具策略">
+          <NTabPane name="tools" :tab="t('pages.config.tabs.tools')">
             <NForm label-placement="left" label-width="120" style="max-width: 600px; margin-top: 16px;">
-              <NFormItem label="工具配置">
+              <NFormItem :label="t('pages.config.labels.toolProfile')">
                 <NSelect v-model:value="toolProfile" :options="profileOptions" />
               </NFormItem>
-              <NFormItem label="允许工具">
+              <NFormItem :label="t('pages.config.labels.allowedTools')">
                 <NDynamicTags v-model:value="allowedTools" />
               </NFormItem>
-              <NFormItem label="禁止工具">
+              <NFormItem :label="t('pages.config.labels.deniedTools')">
                 <NDynamicTags v-model:value="deniedTools" />
               </NFormItem>
               <NFormItem>
                 <NButton type="primary" @click="saveToolSettings" :loading="configStore.saving">
                   <template #icon><NIcon :component="SaveOutline" /></template>
-                  保存
+                  {{ t('common.save') }}
                 </NButton>
               </NFormItem>
             </NForm>
           </NTabPane>
 
           <!-- Sessions -->
-          <NTabPane name="sessions" tab="会话设置">
+          <NTabPane name="sessions" :tab="t('pages.config.tabs.sessions')">
             <NForm label-placement="left" label-width="120" style="max-width: 600px; margin-top: 16px;">
-              <NFormItem label="重置模式">
+              <NFormItem :label="t('pages.config.labels.resetMode')">
                 <NSelect v-model:value="sessionResetMode" :options="resetModeOptions" />
               </NFormItem>
-              <NFormItem v-if="sessionResetMode === 'daily'" label="重置时间 (UTC)">
+              <NFormItem v-if="sessionResetMode === 'daily'" :label="t('pages.config.labels.resetHourUtc')">
                 <NInputNumber v-model:value="sessionResetHour" :min="0" :max="23" />
               </NFormItem>
-              <NFormItem v-if="sessionResetMode === 'idle'" label="空闲分钟数">
+              <NFormItem v-if="sessionResetMode === 'idle'" :label="t('pages.config.labels.idleMinutes')">
                 <NInputNumber v-model:value="sessionIdleMinutes" :min="1" :max="1440" />
               </NFormItem>
-              <NFormItem label="队列模式">
+              <NFormItem :label="t('pages.config.labels.queueMode')">
                 <NSelect v-model:value="queueMode" :options="queueModeOptions" />
               </NFormItem>
               <NFormItem>
                 <NButton type="primary" @click="saveSessionSettings" :loading="configStore.saving">
                   <template #icon><NIcon :component="SaveOutline" /></template>
-                  保存
+                  {{ t('common.save') }}
                 </NButton>
               </NFormItem>
             </NForm>
           </NTabPane>
 
           <!-- Raw JSON -->
-          <NTabPane name="raw" tab="原始 openclaw.json">
+          <NTabPane name="raw" :tab="t('pages.config.tabs.raw')">
             <NAlert type="info" :bordered="false" style="margin: 16px 0 12px;">
-              以下为当前 openclaw.json 的完整配置内容（只读查看）
+              {{ t('pages.config.rawReadonlyHint') }}
             </NAlert>
             <NScrollbar style="max-height: 500px;">
               <NCode :code="rawJsonEdit" language="json" style="font-size: 13px;" />

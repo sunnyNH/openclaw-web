@@ -3,6 +3,7 @@ import { h, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NMenu, NText } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import {
   GridOutline,
   ChatboxEllipsesOutline,
@@ -22,6 +23,7 @@ defineProps<{ collapsed: boolean }>()
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 
 const iconMap: Record<string, unknown> = {
   GridOutline,
@@ -49,7 +51,7 @@ const menuOptions = computed<MenuOption[]>(() => {
   return mainRoute.children
     .filter((child) => !child.meta?.hidden)
     .map((child) => ({
-      label: child.meta?.title as string,
+      label: child.meta?.titleKey ? t(child.meta.titleKey as string) : (child.meta?.title as string),
       key: child.name as string,
       icon: child.meta?.icon ? renderIcon(child.meta.icon as string) : undefined,
     }))

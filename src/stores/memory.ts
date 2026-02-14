@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
 import type { AgentFileEntry, AgentInfo, OpenClawConfig } from '@/api/types'
+import { byLocale, getActiveLocale } from '@/i18n/text'
 
 const BOOTSTRAP_FILE_ORDER = [
   'AGENTS.md',
@@ -158,7 +159,7 @@ export const useMemoryStore = defineStore('memory', () => {
         agents.value = result.agents
         defaultAgentId.value = result.defaultId || result.mainKey || result.agents[0]?.id || 'main'
       } else {
-        throw new Error('未读取到 agent 列表')
+        throw new Error(byLocale('未读取到 agent 列表', 'No agents returned', getActiveLocale()))
       }
     } catch (error) {
       try {

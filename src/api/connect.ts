@@ -1,3 +1,5 @@
+import { getPreferredLocale } from '@/i18n/locale'
+
 export interface ConnectParams {
   minProtocol: number
   maxProtocol: number
@@ -38,8 +40,8 @@ function getClientPlatform(): string {
 }
 
 function getClientLocale(): string | undefined {
-  if (typeof navigator === 'undefined') return undefined
-  return navigator.language || undefined
+  if (typeof window === 'undefined') return undefined
+  return getPreferredLocale()
 }
 
 function getClientUserAgent(): string | undefined {

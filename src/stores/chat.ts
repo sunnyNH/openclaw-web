@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
 import type { ChatMessage } from '@/api/types'
+import { byLocale, getActiveLocale } from '@/i18n/text'
 
 type AgentPhase =
   | 'idle'
@@ -47,6 +48,9 @@ const TOOL_PREVIEW_MAX_CHARS = 6000
 const FINALIZED_RUN_TTL_MS = 5 * 60 * 1000
 
 export const useChatStore = defineStore('chat', () => {
+  const CONTEXT_COMPACTION_DETAIL_ZH = '上下文压缩中...'
+  const CONTEXT_COMPACTION_DETAIL_EN = 'Compacting context...'
+
   const sessionKey = ref('')
   const messages = ref<ChatMessage[]>([])
   const loading = ref(false)
@@ -71,6 +75,21 @@ export const useChatStore = defineStore('chat', () => {
   const finalizedRuns = new Map<string, number>()
 
   const wsStore = useWebSocketStore()
+
+  function toolCompletedDetail(toolName: string): string {
+    const locale = getActiveLocale()
+    return byLocale(`工具完成：${toolName}`, `Tool done: ${toolName}`, locale)
+  }
+
+  function contextCompactionDetail(): string {
+    const locale = getActiveLocale()
+    return byLocale(CONTEXT_COMPACTION_DETAIL_ZH, CONTEXT_COMPACTION_DETAIL_EN, locale)
+  }
+
+  function isContextCompactionDetail(value: string | null): boolean {
+    if (!value) return false
+    return value === CONTEXT_COMPACTION_DETAIL_ZH || value === CONTEXT_COMPACTION_DETAIL_EN
+  }
 
   function markRunFinal(runId: string) {
     const normalized = runId.trim()
@@ -146,16 +165,21 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stepLabel(phase: AgentPhase, detail: string | null): string {
-    if (phase === 'sending') return '消息发送中'
-    if (phase === 'waiting') return '等待响应'
-    if (phase === 'thinking') return detail?.trim() ? detail.trim() : '思考中'
-    if (phase === 'tool') return detail?.trim() ? `调用工具：${detail.trim()}` : '调用工具中'
-    if (phase === 'replying') return '回复中'
-    if (phase === 'aborting') return '停止中...'
-    if (phase === 'done') return '本轮完成'
-    if (phase === 'aborted') return '已停止'
-    if (phase === 'error') return detail?.trim() ? `错误：${detail.trim()}` : '错误'
-    return '空闲'
+    const locale = getActiveLocale()
+    if (phase === 'sending') return byLocale('消息发送中', 'Sending', locale)
+    if (phase === 'waiting') return byLocale('等待响应', 'Waiting', locale)
+    if (phase === 'thinking') return detail?.trim() ? detail.trim() : byLocale('思考中', 'Thinking', locale)
+    if (phase === 'tool') {
+      return detail?.trim()
+        ? byLocale(`调用工具：${detail.trim()}`, `Calling tool: ${detail.trim()}`, locale)
+        : byLocale('调用工具中', 'Running tool', locale)
+    }
+    if (phase === 'replying') return byLocale('回复中', 'Replying', locale)
+    if (phase === 'aborting') return byLocale('停止中...', 'Stopping...', locale)
+    if (phase === 'done') return byLocale('本轮完成', 'Done', locale)
+    if (phase === 'aborted') return byLocale('已停止', 'Stopped', locale)
+    if (phase === 'error') return detail?.trim() ? byLocale(`错误：${detail.trim()}`, `Error: ${detail.trim()}`, locale) : byLocale('错误', 'Error', locale)
+    return byLocale('空闲', 'Idle', locale)
   }
 
   function appendAgentStep(phase: AgentPhase, detail: string | null) {
@@ -704,7 +728,7 @@ export const useChatStore = defineStore('chat', () => {
           if (toolPhase === 'result') {
             // 工具结束后通常会继续思考/生成；这里只做一次轻量状态回落
             if (agentStatus.value.phase === 'tool') {
-              setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: toolName ? `工具完成：${toolName}` : null })
+              setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: toolName ? toolCompletedDetail(toolName) : null })
             }
             return
           }
@@ -713,11 +737,11 @@ export const useChatStore = defineStore('chat', () => {
         if (stream === 'compaction') {
           const phase = asString((data as Record<string, unknown>).phase).trim().toLowerCase()
           if (phase === 'start') {
-            setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: '上下文压缩中...' })
+            setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: contextCompactionDetail() })
             return
           }
           if (phase === 'end') {
-            if (agentStatus.value.phase === 'thinking' && agentStatus.value.detail === '上下文压缩中...') {
+            if (agentStatus.value.phase === 'thinking' && isContextCompactionDetail(agentStatus.value.detail)) {
               setAgentStatusPhase('thinking', { runId: activeRunId || runIdInEvent || null, detail: null })
             }
             return
@@ -778,7 +802,7 @@ export const useChatStore = defineStore('chat', () => {
     const text = content.trim()
     if (!text) return
     if (!sessionKey.value.trim()) {
-      throw new Error('请先填写会话 Key')
+      throw new Error(byLocale('请先填写会话 Key', 'Please enter the session key', getActiveLocale()))
     }
 
     const idempotencyKey = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -818,14 +842,14 @@ export const useChatStore = defineStore('chat', () => {
 
   async function abortActiveRun() {
     if (!sessionKey.value.trim()) {
-      throw new Error('请先填写会话 Key')
+      throw new Error(byLocale('请先填写会话 Key', 'Please enter the session key', getActiveLocale()))
     }
     const phase = agentStatus.value.phase
     if (phase === 'idle' || phase === 'done' || phase === 'aborted' || phase === 'error') {
       return
     }
 
-    setAgentStatusPhase('aborting', { detail: '停止中...' })
+    setAgentStatusPhase('aborting', { detail: byLocale('停止中...', 'Stopping...', getActiveLocale()) })
     try {
       await wsStore.rpc.abortChat(undefined, sessionKey.value.trim())
     } catch (error) {

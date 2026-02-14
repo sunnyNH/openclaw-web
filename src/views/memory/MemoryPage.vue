@@ -24,6 +24,7 @@ import {
   SaveOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { formatDate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
 import { useMemoryStore } from '@/stores/memory'
@@ -34,7 +35,7 @@ type DocRisk = 'high' | 'normal'
 type DocMeta = {
   label: string
   group: DocGroupKey
-  description: string
+  descriptionKey: string
   risk: DocRisk
 }
 
@@ -55,72 +56,66 @@ type Snippet = {
   content: string
 }
 
-const DOC_GROUP_LABELS: Record<DocGroupKey, string> = {
-  role: '角色与人格',
-  runtime: '运行与策略',
-  memory: '记忆与偏好',
-  other: '其他',
-}
-
 const DOC_META_MAP: Record<string, DocMeta> = {
   'AGENTS.md': {
     label: 'AGENTS',
     group: 'role',
-    description: '主行为规则与约束（高影响）',
+    descriptionKey: 'pages.memory.docs.AGENTS.description',
     risk: 'high',
   },
   'SOUL.md': {
     label: 'SOUL',
     group: 'role',
-    description: '人格、语气与风格（高影响）',
+    descriptionKey: 'pages.memory.docs.SOUL.description',
     risk: 'high',
   },
   'IDENTITY.md': {
     label: 'IDENTITY',
     group: 'role',
-    description: '名称、头像、主题等身份',
+    descriptionKey: 'pages.memory.docs.IDENTITY.description',
     risk: 'normal',
   },
   'USER.md': {
     label: 'USER',
     group: 'memory',
-    description: '用户偏好与沟通约定',
+    descriptionKey: 'pages.memory.docs.USER.description',
     risk: 'normal',
   },
   'TOOLS.md': {
     label: 'TOOLS',
     group: 'runtime',
-    description: '工具使用说明（不控制可用性）',
+    descriptionKey: 'pages.memory.docs.TOOLS.description',
     risk: 'normal',
   },
   'HEARTBEAT.md': {
     label: 'HEARTBEAT',
     group: 'runtime',
-    description: '心跳回合任务提示',
+    descriptionKey: 'pages.memory.docs.HEARTBEAT.description',
     risk: 'normal',
   },
   'BOOTSTRAP.md': {
     label: 'BOOTSTRAP',
     group: 'runtime',
-    description: '启动注入上下文（高影响）',
+    descriptionKey: 'pages.memory.docs.BOOTSTRAP.description',
     risk: 'high',
   },
   'MEMORY.md': {
     label: 'MEMORY',
     group: 'memory',
-    description: '长期稳定事实与偏好',
+    descriptionKey: 'pages.memory.docs.MEMORY.description',
     risk: 'normal',
   },
   'memory.md': {
     label: 'memory',
     group: 'memory',
-    description: '长期稳定事实与偏好',
+    descriptionKey: 'pages.memory.docs.MEMORY.description',
     risk: 'normal',
   },
 }
 
 const memoryStore = useMemoryStore()
 const message = useMessage()
+const { t } = useI18n()
 const editorContent = ref('')
 const isEditing = ref(false)
 
@@ -168,7 +163,7 @@ const docEntries = computed<DocEntry[]>(() => {
       updatedAtMs: file.updatedAtMs,
       label: meta?.label || file.name,
       group: meta?.group || 'other',
-      description: meta?.description || '未分类文档',
+      description: meta?.descriptionKey ? t(meta.descriptionKey) : t('pages.memory.uncategorizedDoc'),
       risk: meta?.risk || 'normal',
     }
     const key = isMemoryAliasName(entry.name) ? 'memory.md' : entry.name
@@ -193,7 +188,7 @@ const groupedDocs = computed<Array<{ key: DocGroupKey; label: string; items: Doc
   return (Object.keys(groups) as DocGroupKey[])
     .map((key) => ({
       key,
-      label: DOC_GROUP_LABELS[key],
+      label: t(`pages.memory.groups.${key}`),
       items: groups[key],
     }))
     .filter((group) => group.items.length > 0)
@@ -214,13 +209,13 @@ const charCount = computed(() => editorContent.value.length)
 const lineCount = computed(() => (editorContent.value ? editorContent.value.split(/\r?\n/).length : 0))
 const previewHtml = computed(() =>
   renderSimpleMarkdown(memoryStore.currentContent || '', {
-    emptyHtml: '<p class="memory-markdown-empty">当前文件为空，点击“编辑文档”开始维护内容。</p>',
+    emptyHtml: `<p class="memory-markdown-empty">${t('pages.memory.emptyDocHtml')}</p>`,
   })
 )
 
 const fileStateLabel = computed(() => {
-  if (!activeFile.value) return '未加载'
-  return activeFile.value.missing ? '未创建' : '已存在'
+  if (!activeFile.value) return t('pages.memory.fileState.notLoaded')
+  return activeFile.value.missing ? t('pages.memory.fileState.notCreated') : t('pages.memory.fileState.exists')
 })
 
 const fileStateType = computed<'warning' | 'success'>(() => {
@@ -229,7 +224,7 @@ const fileStateType = computed<'warning' | 'success'>(() => {
 })
 
 const fileUpdatedText = computed(() =>
-  activeFile.value?.updatedAtMs ? formatDate(activeFile.value.updatedAtMs) : '未创建'
+  activeFile.value?.updatedAtMs ? formatDate(activeFile.value.updatedAtMs) : t('pages.memory.fileState.notCreated')
 )
 
 const fileSizeText = computed(() => formatBytes(activeFile.value?.size))
@@ -241,16 +236,26 @@ const snippets = computed<Snippet[]>(() => {
   const fileName = memoryStore.selectedFileName
   const common = [
     {
-      label: '事实记录',
-      content: ['## 事实记录', '- 背景：', '- 决策：', '- 结论：'].join('\n'),
+      label: t('pages.memory.snippets.facts.label'),
+      content: [
+        `## ${t('pages.memory.snippets.facts.heading')}`,
+        `- ${t('pages.memory.snippets.facts.items.background')}`,
+        `- ${t('pages.memory.snippets.facts.items.decision')}`,
+        `- ${t('pages.memory.snippets.facts.items.conclusion')}`,
+      ].join('\n'),
     },
   ]
 
   if (fileName === 'AGENTS.md') {
     return [
       {
-        label: '行为原则',
-        content: ['## 行为原则', '- 目标：', '- 约束：', '- 禁止事项：'].join('\n'),
+        label: t('pages.memory.snippets.principles.label'),
+        content: [
+          `## ${t('pages.memory.snippets.principles.heading')}`,
+          `- ${t('pages.memory.snippets.principles.items.goal')}`,
+          `- ${t('pages.memory.snippets.principles.items.constraints')}`,
+          `- ${t('pages.memory.snippets.principles.items.prohibited')}`,
+        ].join('\n'),
       },
       ...common,
     ]
@@ -259,8 +264,13 @@ const snippets = computed<Snippet[]>(() => {
   if (fileName === 'SOUL.md') {
     return [
       {
-        label: '人格设定',
-        content: ['## 人格设定', '- 语气：', '- 风格：', '- 行事准则：'].join('\n'),
+        label: t('pages.memory.snippets.persona.label'),
+        content: [
+          `## ${t('pages.memory.snippets.persona.heading')}`,
+          `- ${t('pages.memory.snippets.persona.items.tone')}`,
+          `- ${t('pages.memory.snippets.persona.items.style')}`,
+          `- ${t('pages.memory.snippets.persona.items.principles')}`,
+        ].join('\n'),
       },
       ...common,
     ]
@@ -269,8 +279,13 @@ const snippets = computed<Snippet[]>(() => {
   if (fileName === 'BOOTSTRAP.md') {
     return [
       {
-        label: '启动约束',
-        content: ['## 启动约束', '- 目标：', '- 当前环境：', '- 首轮执行策略：'].join('\n'),
+        label: t('pages.memory.snippets.bootstrap.label'),
+        content: [
+          `## ${t('pages.memory.snippets.bootstrap.heading')}`,
+          `- ${t('pages.memory.snippets.bootstrap.items.goal')}`,
+          `- ${t('pages.memory.snippets.bootstrap.items.environment')}`,
+          `- ${t('pages.memory.snippets.bootstrap.items.firstRun')}`,
+        ].join('\n'),
       },
       ...common,
     ]
@@ -279,8 +294,13 @@ const snippets = computed<Snippet[]>(() => {
   if (fileName === 'USER.md') {
     return [
       {
-        label: '用户偏好',
-        content: ['## 用户偏好', '- 偏好输出：', '- 禁忌：', '- 语气偏好：'].join('\n'),
+        label: t('pages.memory.snippets.userPreference.label'),
+        content: [
+          `## ${t('pages.memory.snippets.userPreference.heading')}`,
+          `- ${t('pages.memory.snippets.userPreference.items.output')}`,
+          `- ${t('pages.memory.snippets.userPreference.items.taboo')}`,
+          `- ${t('pages.memory.snippets.userPreference.items.tone')}`,
+        ].join('\n'),
       },
       ...common,
     ]
@@ -289,8 +309,12 @@ const snippets = computed<Snippet[]>(() => {
   if (fileName === 'HEARTBEAT.md') {
     return [
       {
-        label: '心跳任务',
-        content: ['## Tasks', '- [ ] 每日检查运行状态', '- [ ] 清理异常任务'].join('\n'),
+        label: t('pages.memory.snippets.heartbeat.label'),
+        content: [
+          `## ${t('pages.memory.snippets.heartbeat.heading')}`,
+          `- [ ] ${t('pages.memory.snippets.heartbeat.items.dailyStatus')}`,
+          `- [ ] ${t('pages.memory.snippets.heartbeat.items.cleanup')}`,
+        ].join('\n'),
       },
       ...common,
     ]
@@ -298,12 +322,22 @@ const snippets = computed<Snippet[]>(() => {
 
   return [
     {
-      label: '偏好模板',
-      content: ['## 偏好', '- 输出风格：', '- 禁用项：', '- 沟通节奏：'].join('\n'),
+      label: t('pages.memory.snippets.preferenceTemplate.label'),
+      content: [
+        `## ${t('pages.memory.snippets.preferenceTemplate.heading')}`,
+        `- ${t('pages.memory.snippets.preferenceTemplate.items.outputStyle')}`,
+        `- ${t('pages.memory.snippets.preferenceTemplate.items.disabled')}`,
+        `- ${t('pages.memory.snippets.preferenceTemplate.items.pacing')}`,
+      ].join('\n'),
     },
     {
-      label: '项目约定',
-      content: ['## 项目约定', '- 分支规范：', '- 发布流程：', '- 验证标准：'].join('\n'),
+      label: t('pages.memory.snippets.projectConventions.label'),
+      content: [
+        `## ${t('pages.memory.snippets.projectConventions.heading')}`,
+        `- ${t('pages.memory.snippets.projectConventions.items.branching')}`,
+        `- ${t('pages.memory.snippets.projectConventions.items.release')}`,
+        `- ${t('pages.memory.snippets.projectConventions.items.verification')}`,
+      ].join('\n'),
     },
     ...common,
   ]
@@ -321,7 +355,7 @@ onMounted(async () => {
   try {
     await memoryStore.initialize()
   } catch (error) {
-    message.warning(error instanceof Error ? error.message : '记忆模块初始化失败')
+    message.warning(error instanceof Error ? error.message : t('pages.memory.messages.initFailed'))
   }
 })
 
@@ -334,7 +368,7 @@ function formatBytes(value?: number): string {
 
 function confirmDiscardIfNeeded(): boolean {
   if (!isEditing.value || !hasUnsavedChanges.value) return true
-  return window.confirm('当前有未保存修改，切换后将丢失。确认继续吗？')
+  return window.confirm(t('pages.memory.messages.discardConfirm'))
 }
 
 function handleStartEdit() {
@@ -349,7 +383,7 @@ function handleCancelEdit() {
 
 function handleResetEditor() {
   editorContent.value = memoryStore.currentContent
-  message.info('已恢复为最近加载内容')
+  message.info(t('pages.memory.messages.resetToLoaded'))
 }
 
 function appendSnippet(text: string) {
@@ -361,9 +395,10 @@ function appendSnippet(text: string) {
 }
 
 function insertTodayTemplate() {
-  const dateText = new Date()
-    .toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-    .replace(/\//g, '-')
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const dateText = `${now.getFullYear()}-${month}-${day}`
   appendSnippet(`## ${dateText}\n- `)
 }
 
@@ -374,7 +409,7 @@ async function handleSwitchAgent(agentId: string) {
     isEditing.value = false
     await memoryStore.switchAgent(agentId)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '切换 Agent 失败')
+    message.error(error instanceof Error ? error.message : t('pages.memory.messages.switchAgentFailed'))
   }
 }
 
@@ -385,7 +420,7 @@ async function handleSelectDoc(name: string) {
     isEditing.value = false
     await memoryStore.loadFile(name)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '加载文档失败')
+    message.error(error instanceof Error ? error.message : t('pages.memory.messages.loadDocFailed'))
   }
 }
 
@@ -394,27 +429,27 @@ async function handleRefresh() {
   try {
     isEditing.value = false
     await memoryStore.refresh()
-    message.success('文档已刷新')
+    message.success(t('pages.memory.messages.refreshed'))
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '刷新失败')
+    message.error(error instanceof Error ? error.message : t('pages.memory.messages.refreshFailed'))
   }
 }
 
 async function handleSave() {
   if (!memoryStore.selectedAgentId || !memoryStore.selectedFileName) {
-    message.warning('请先选择 Agent 与文档')
+    message.warning(t('pages.memory.messages.selectAgentAndDocFirst'))
     return
   }
   if (activeDoc.value?.risk === 'high') {
-    const confirmed = window.confirm(`正在保存高影响文档 ${memoryStore.selectedFileName}，确认继续？`)
+    const confirmed = window.confirm(t('pages.memory.messages.saveHighRiskConfirm', { name: memoryStore.selectedFileName }))
     if (!confirmed) return
   }
   try {
     await memoryStore.saveFile(editorContent.value, memoryStore.selectedFileName)
-    message.success('文档已保存')
+    message.success(t('pages.memory.messages.saved'))
     isEditing.value = false
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '保存失败')
+    message.error(error instanceof Error ? error.message : t('common.saveFailed'))
   }
 }
 
@@ -427,36 +462,35 @@ function isActiveDoc(name: string): boolean {
   <div class="memory-page">
     <NCard class="memory-hero" :bordered="false">
       <template #header>
-        <div class="memory-hero-title">记忆与文档管理</div>
+        <div class="memory-hero-title">{{ t('pages.memory.title') }}</div>
       </template>
       <template #header-extra>
         <NSpace :size="8">
           <NButton size="small" :loading="loading" @click="handleRefresh">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新
+            {{ t('common.refresh') }}
           </NButton>
           <NButton v-if="!isEditing" size="small" type="primary" tertiary @click="handleStartEdit">
             <template #icon><NIcon :component="CreateOutline" /></template>
-            编辑文档
+            {{ t('pages.memory.actions.edit') }}
           </NButton>
           <NButton v-else size="small" @click="handleCancelEdit">
-            取消编辑
+            {{ t('pages.memory.actions.cancelEdit') }}
           </NButton>
           <NButton v-if="isEditing" size="small" type="primary" :loading="memoryStore.saving" @click="handleSave">
             <template #icon><NIcon :component="SaveOutline" /></template>
-            保存文档
+            {{ t('pages.memory.actions.saveDoc') }}
           </NButton>
         </NSpace>
       </template>
 
       <NSpace vertical :size="10">
         <NAlert type="info" :show-icon="true" :bordered="false">
-          覆盖 OpenClaw 官方可管理文档：<code>AGENTS</code>、<code>SOUL</code>、<code>IDENTITY</code>、
-          <code>USER</code>、<code>TOOLS</code>、<code>HEARTBEAT</code>、<code>BOOTSTRAP</code>、
-          <code>MEMORY</code>。
+          {{ t('pages.memory.coveredDocsPrefix') }}
+          <code>AGENTS</code>, <code>SOUL</code>, <code>IDENTITY</code>, <code>USER</code>, <code>TOOLS</code>, <code>HEARTBEAT</code>, <code>BOOTSTRAP</code>, <code>MEMORY</code>{{ t('pages.memory.coveredDocsSuffix') }}
         </NAlert>
         <NAlert v-if="memoryStore.lastError" type="warning" :show-icon="true" :bordered="false">
-          当前网关可能不支持 <code>agents.files.*</code> 或权限受限：{{ memoryStore.lastError }}
+          {{ t('pages.memory.gatewayLimited', { error: memoryStore.lastError }) }}
         </NAlert>
       </NSpace>
 
@@ -465,23 +499,23 @@ function isActiveDoc(name: string): boolean {
           :value="memoryStore.selectedAgentId"
           :options="agentOptions"
           :loading="memoryStore.loadingAgents"
-          placeholder="选择 Agent"
+          :placeholder="t('pages.memory.agentPlaceholder')"
           @update:value="(value) => handleSwitchAgent(String(value || ''))"
         />
         <div class="memory-stats-inline">
-          <span>{{ docCount }} 个文档</span>
-          <span>高影响 {{ highRiskDocCount }} 个</span>
-          <span>当前 {{ memoryStore.selectedFileName || '-' }}</span>
+          <span>{{ t('pages.memory.stats.docsCount', { count: docCount }) }}</span>
+          <span>{{ t('pages.memory.stats.highRiskCount', { count: highRiskDocCount }) }}</span>
+          <span>{{ t('pages.memory.stats.currentDoc', { name: memoryStore.selectedFileName || '-' }) }}</span>
         </div>
         <NSpace :size="6">
           <NTag size="small" :type="fileStateType" :bordered="false" round>
             {{ fileStateLabel }}
           </NTag>
           <NTag v-if="activeDoc?.risk === 'high'" size="small" type="error" :bordered="false" round>
-            高影响
+            {{ t('pages.memory.tags.highRisk') }}
           </NTag>
           <NTag v-if="isEditing && hasUnsavedChanges" size="small" type="warning" :bordered="false" round>
-            未保存
+            {{ t('pages.memory.tags.unsaved') }}
           </NTag>
         </NSpace>
       </div>
@@ -492,7 +526,7 @@ function isActiveDoc(name: string): boolean {
         <template #header>
           <NSpace :size="6" align="center">
             <NIcon :component="BookOutline" />
-            <NText strong>文档目录</NText>
+            <NText strong>{{ t('pages.memory.nav.title') }}</NText>
           </NSpace>
         </template>
 
@@ -514,10 +548,10 @@ function isActiveDoc(name: string): boolean {
                     <NTag
                       size="small"
                       :bordered="false"
-                      :type="item.missing ? 'warning' : 'success'"
-                      class="memory-doc-item-state"
-                    >
-                      {{ item.missing ? '未创建' : '已存在' }}
+                    :type="item.missing ? 'warning' : 'success'"
+                    class="memory-doc-item-state"
+                  >
+                      {{ item.missing ? t('pages.memory.fileState.notCreated') : t('pages.memory.fileState.exists') }}
                     </NTag>
                   </div>
                   <div class="memory-doc-item-name">{{ item.name }}</div>
@@ -528,7 +562,7 @@ function isActiveDoc(name: string): boolean {
               </div>
             </section>
           </template>
-          <NEmpty v-else description="暂无可管理文档" />
+          <NEmpty v-else :description="t('pages.memory.emptyDocs')" />
         </div>
       </NCard>
 
@@ -538,10 +572,10 @@ function isActiveDoc(name: string): boolean {
             <div class="memory-main-header">
               <NSpace :size="6" align="center">
                 <NIcon :component="DocumentTextOutline" />
-                <NText strong>{{ activeDoc?.label || memoryStore.selectedFileName || '未选择文档' }}</NText>
+                <NText strong>{{ activeDoc?.label || memoryStore.selectedFileName || t('pages.memory.noDocSelected') }}</NText>
                 <NText depth="3">{{ memoryStore.selectedFileName || '-' }}</NText>
               </NSpace>
-              <NText depth="3" style="font-size: 12px;">{{ lineCount }} 行 · {{ charCount }} 字符</NText>
+              <NText depth="3" style="font-size: 12px;">{{ t('pages.memory.editor.stats', { lines: lineCount, chars: charCount }) }}</NText>
             </div>
           </template>
 
@@ -551,14 +585,14 @@ function isActiveDoc(name: string): boolean {
               class="memory-editor"
               type="textarea"
               :autosize="{ minRows: 20, maxRows: 30 }"
-              placeholder="以 Markdown 维护文档。空内容保存将写入空文件。"
+              :placeholder="t('pages.memory.editor.placeholder')"
             />
             <div class="memory-editor-footer">
-              <NText depth="3">保存后将写入当前 Agent 工作区文档。</NText>
+              <NText depth="3">{{ t('pages.memory.editor.saveHint') }}</NText>
               <NSpace :size="8">
-                <NButton size="small" @click="handleResetEditor">恢复</NButton>
-                <NButton size="small" @click="handleCancelEdit">取消</NButton>
-                <NButton size="small" type="primary" :loading="memoryStore.saving" @click="handleSave">保存</NButton>
+                <NButton size="small" @click="handleResetEditor">{{ t('pages.memory.actions.restore') }}</NButton>
+                <NButton size="small" @click="handleCancelEdit">{{ t('common.cancel') }}</NButton>
+                <NButton size="small" type="primary" :loading="memoryStore.saving" @click="handleSave">{{ t('common.save') }}</NButton>
               </NSpace>
             </div>
           </template>
@@ -566,10 +600,10 @@ function isActiveDoc(name: string): boolean {
           <template v-else>
             <div class="memory-markdown" v-html="previewHtml"></div>
             <div class="memory-editor-footer">
-              <NText depth="3">当前为阅读模式，点击“编辑文档”进入可写状态。</NText>
+              <NText depth="3">{{ t('pages.memory.readonlyHint') }}</NText>
               <NButton size="small" type="primary" tertiary @click="handleStartEdit">
                 <template #icon><NIcon :component="CreateOutline" /></template>
-                编辑文档
+                {{ t('pages.memory.actions.edit') }}
               </NButton>
             </div>
           </template>
@@ -579,30 +613,30 @@ function isActiveDoc(name: string): boolean {
           <template #header>
             <NSpace :size="6" align="center">
               <NIcon :component="SparklesOutline" />
-              <NText strong>文档信息</NText>
+              <NText strong>{{ t('pages.memory.infoCard.title') }}</NText>
             </NSpace>
           </template>
 
           <div class="memory-meta-grid">
             <div class="memory-meta-item">
-              <NText depth="3">工作区</NText>
+              <NText depth="3">{{ t('pages.memory.infoCard.workspace') }}</NText>
               <code><NEllipsis>{{ memoryStore.workspace || '-' }}</NEllipsis></code>
             </div>
             <div class="memory-meta-item">
-              <NText depth="3">文件路径</NText>
+              <NText depth="3">{{ t('pages.memory.infoCard.filePath') }}</NText>
               <code><NEllipsis>{{ activeDoc?.path || activeFile?.path || '-' }}</NEllipsis></code>
             </div>
             <div class="memory-meta-item">
-              <NText depth="3">更新时间</NText>
+              <NText depth="3">{{ t('pages.memory.infoCard.updatedAt') }}</NText>
               <div>{{ fileUpdatedText }}</div>
             </div>
             <div class="memory-meta-item">
-              <NText depth="3">文件大小</NText>
+              <NText depth="3">{{ t('pages.memory.infoCard.fileSize') }}</NText>
               <div>{{ fileSizeText }}</div>
             </div>
           </div>
 
-          <NDivider title-placement="left">模板片段</NDivider>
+          <NDivider title-placement="left">{{ t('pages.memory.snippets.title') }}</NDivider>
           <NSpace :size="6" wrap>
             <NButton
               v-for="snippet in snippets"
@@ -614,11 +648,11 @@ function isActiveDoc(name: string): boolean {
             >
               {{ snippet.label }}
             </NButton>
-            <NButton size="small" tertiary @click="insertTodayTemplate">插入今日模板</NButton>
+            <NButton size="small" tertiary @click="insertTodayTemplate">{{ t('pages.memory.snippets.insertToday') }}</NButton>
           </NSpace>
 
           <NText depth="3" style="display: block; margin-top: 10px; font-size: 12px;">
-            每日流水记忆默认写入 <code>memory/YYYY-MM-DD.md</code>。本页聚焦官方可管理核心文档。
+            {{ t('pages.memory.snippets.footerHintPrefix') }} <code>memory/YYYY-MM-DD.md</code>{{ t('pages.memory.snippets.footerHintSuffix') }}
           </NText>
         </NCard>
       </div>

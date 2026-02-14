@@ -27,6 +27,7 @@ import {
   TimeOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/session'
 import { downloadJSON, formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
 import type { Session } from '@/api/types'
@@ -42,6 +43,7 @@ type SessionRow = Session & {
 const router = useRouter()
 const sessionStore = useSessionStore()
 const message = useMessage()
+const { t } = useI18n()
 
 const searchQuery = ref('')
 const channelFilter = ref<string>('all')
@@ -49,10 +51,10 @@ const modelFilter = ref<string>('all')
 const sortMode = ref<SortMode>('recent')
 const selectedSessionKey = ref('')
 
-const sortOptions: SelectOption[] = [
-  { label: '按最近活动', value: 'recent' },
-  { label: '按消息数量', value: 'messages' },
-]
+const sortOptions = computed<SelectOption[]>(() => ([
+  { label: t('pages.sessions.list.sort.recent'), value: 'recent' },
+  { label: t('pages.sessions.list.sort.messages'), value: 'messages' },
+]))
 
 const sessionRows = computed<SessionRow[]>(() => {
   return sessionStore.sessions.map((session) => {
@@ -70,7 +72,7 @@ const sessionRows = computed<SessionRow[]>(() => {
 const channelOptions = computed<SelectOption[]>(() => {
   const set = new Set(sessionRows.value.map((item) => item.parsed.channel).filter(Boolean))
   return [
-    { label: '全部渠道', value: 'all' },
+    { label: t('pages.sessions.list.filters.allChannels'), value: 'all' },
     ...Array.from(set)
       .sort((a, b) => a.localeCompare(b))
       .map((channel) => ({ label: channel, value: channel })),
@@ -80,7 +82,7 @@ const channelOptions = computed<SelectOption[]>(() => {
 const modelOptions = computed<SelectOption[]>(() => {
   const set = new Set(sessionRows.value.map((item) => item.model || '').filter(Boolean))
   return [
-    { label: '全部模型', value: 'all' },
+    { label: t('pages.sessions.list.filters.allModels'), value: 'all' },
     ...Array.from(set)
       .sort((a, b) => a.localeCompare(b))
       .map((model) => ({ label: model, value: model })),
@@ -132,9 +134,9 @@ const selectedSession = computed<SessionRow | null>(() =>
   filteredSessions.value.find((item) => item.key === selectedSessionKey.value) || null
 )
 
-const sessionColumns: DataTableColumns<SessionRow> = [
+const sessionColumns = computed<DataTableColumns<SessionRow>>(() => ([
   {
-    title: '会话',
+    title: t('pages.sessions.list.columns.session'),
     key: 'session',
     minWidth: 320,
     render(row) {
@@ -143,7 +145,7 @@ const sessionColumns: DataTableColumns<SessionRow> = [
           h(NTag, { size: 'small', type: 'info', bordered: false, round: true }, { default: () => row.parsed.agent }),
           h(NTag, { size: 'small', bordered: false, round: true }, { default: () => row.parsed.channel }),
           row.active24h
-            ? h(NTag, { size: 'small', bordered: false, type: 'success', round: true }, { default: () => '24h 活跃' })
+            ? h(NTag, { size: 'small', bordered: false, type: 'success', round: true }, { default: () => t('pages.sessions.list.badges.active24h') })
             : null,
         ]),
         h(
@@ -155,7 +157,7 @@ const sessionColumns: DataTableColumns<SessionRow> = [
     },
   },
   {
-    title: '消息数',
+    title: t('pages.sessions.list.columns.messageCount'),
     key: 'messageCount',
     width: 100,
     sorter: (a, b) => a.messageCount - b.messageCount,
@@ -164,7 +166,7 @@ const sessionColumns: DataTableColumns<SessionRow> = [
     },
   },
   {
-    title: '模型',
+    title: t('pages.sessions.list.columns.model'),
     key: 'model',
     minWidth: 180,
     ellipsis: { tooltip: true },
@@ -173,7 +175,7 @@ const sessionColumns: DataTableColumns<SessionRow> = [
     },
   },
   {
-    title: '最近活动',
+    title: t('pages.sessions.list.columns.lastActivity'),
     key: 'lastActivity',
     width: 150,
     sorter: (a, b) => a.lastActivityTs - b.lastActivityTs,
@@ -181,7 +183,7 @@ const sessionColumns: DataTableColumns<SessionRow> = [
       return row.lastActivity ? formatRelativeTime(row.lastActivity) : '-'
     },
   },
-]
+]))
 
 watch(
   filteredSessions,
@@ -246,18 +248,18 @@ async function handleRefresh() {
 async function handleReset(session: SessionRow) {
   try {
     await sessionStore.resetSession(session.key)
-    message.success('会话已重置')
+    message.success(t('pages.sessions.detail.resetSuccess'))
   } catch {
-    message.error('重置失败')
+    message.error(t('pages.sessions.detail.resetFailed'))
   }
 }
 
 async function handleDelete(session: SessionRow) {
   try {
     await sessionStore.deleteSession(session.key)
-    message.success('会话已删除')
+    message.success(t('pages.sessions.detail.deleteSuccess'))
   } catch {
-    message.error('删除失败')
+    message.error(t('pages.sessions.detail.deleteFailed'))
   }
 }
 
@@ -265,9 +267,9 @@ async function handleExport(session: SessionRow) {
   try {
     const data = await sessionStore.exportSession(session.key)
     downloadJSON(data, `session-${session.key.replace(/:/g, '-')}.json`)
-    message.success('导出成功')
+    message.success(t('pages.sessions.detail.exportSuccess'))
   } catch {
-    message.error('导出失败')
+    message.error(t('pages.sessions.detail.exportFailed'))
   }
 }
 </script>
@@ -276,26 +278,26 @@ async function handleExport(session: SessionRow) {
   <div class="sessions-page">
     <NCard class="sessions-hero" :bordered="false">
       <template #header>
-        <div class="sessions-hero-title">会话管理</div>
+        <div class="sessions-hero-title">{{ t('pages.sessions.list.title') }}</div>
       </template>
       <template #header-extra>
         <NButton size="small" :loading="sessionStore.loading" @click="handleRefresh">
           <template #icon>
             <NIcon :component="RefreshOutline" />
           </template>
-          刷新
+          {{ t('common.refresh') }}
         </NButton>
       </template>
 
       <NAlert type="info" :bordered="false">
-        先筛选会话，再在右侧执行查看详情、导出、重置、删除等操作，避免误操作。
+        {{ t('pages.sessions.list.hint') }}
       </NAlert>
 
       <NGrid cols="1 s:2 m:4" responsive="screen" :x-gap="10" :y-gap="10" style="margin-top: 12px;">
         <NGridItem>
           <NCard embedded :bordered="false" class="sessions-metric-card">
             <NSpace justify="space-between" align="center">
-              <NText depth="3">会话总数</NText>
+              <NText depth="3">{{ t('pages.sessions.list.metrics.totalSessions') }}</NText>
               <NIcon :component="ChatbubblesOutline" />
             </NSpace>
             <div class="sessions-metric-value">{{ stats.total }}</div>
@@ -304,7 +306,7 @@ async function handleExport(session: SessionRow) {
         <NGridItem>
           <NCard embedded :bordered="false" class="sessions-metric-card">
             <NSpace justify="space-between" align="center">
-              <NText depth="3">24h 活跃</NText>
+              <NText depth="3">{{ t('pages.sessions.list.metrics.active24h') }}</NText>
               <NIcon :component="TimeOutline" />
             </NSpace>
             <div class="sessions-metric-value">{{ stats.active24h }}</div>
@@ -313,8 +315,8 @@ async function handleExport(session: SessionRow) {
         <NGridItem>
           <NCard embedded :bordered="false" class="sessions-metric-card">
             <NSpace justify="space-between" align="center">
-              <NText depth="3">消息总量</NText>
-              <NText depth="3">条</NText>
+              <NText depth="3">{{ t('pages.sessions.list.metrics.totalMessages') }}</NText>
+              <NText depth="3">{{ t('pages.sessions.list.units.messages') }}</NText>
             </NSpace>
             <div class="sessions-metric-value">{{ stats.totalMessages }}</div>
           </NCard>
@@ -322,8 +324,8 @@ async function handleExport(session: SessionRow) {
         <NGridItem>
           <NCard embedded :bordered="false" class="sessions-metric-card">
             <NSpace justify="space-between" align="center">
-              <NText depth="3">渠道数</NText>
-              <NText depth="3">个</NText>
+              <NText depth="3">{{ t('pages.sessions.list.metrics.uniqueChannels') }}</NText>
+              <NText depth="3">{{ t('pages.sessions.list.units.channels') }}</NText>
             </NSpace>
             <div class="sessions-metric-value">{{ stats.uniqueChannels }}</div>
           </NCard>
@@ -331,7 +333,7 @@ async function handleExport(session: SessionRow) {
       </NGrid>
 
       <div class="sessions-filter-bar">
-        <NInput v-model:value="searchQuery" clearable placeholder="搜索 key / agent / 渠道 / 对话方 / 模型">
+        <NInput v-model:value="searchQuery" clearable :placeholder="t('pages.sessions.list.searchPlaceholder')">
           <template #prefix>
             <NIcon :component="SearchOutline" />
           </template>
@@ -339,16 +341,16 @@ async function handleExport(session: SessionRow) {
         <NSelect v-model:value="channelFilter" :options="channelOptions" />
         <NSelect v-model:value="modelFilter" :options="modelOptions" />
         <NSelect v-model:value="sortMode" :options="sortOptions" />
-        <NButton @click="clearFilters">清空筛选</NButton>
+        <NButton @click="clearFilters">{{ t('pages.sessions.list.clearFilters') }}</NButton>
       </div>
     </NCard>
 
     <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
       <NGridItem :span="2" class="sessions-grid-item">
-        <NCard title="会话列表" class="sessions-card">
+        <NCard :title="t('pages.sessions.list.listTitle')" class="sessions-card">
           <template #header-extra>
             <NText depth="3" style="font-size: 12px;">
-              当前 {{ filteredSessions.length }} / 共 {{ stats.total }}
+              {{ t('pages.sessions.list.listCount', { current: filteredSessions.length, total: stats.total }) }}
             </NText>
           </template>
 
@@ -368,7 +370,7 @@ async function handleExport(session: SessionRow) {
       </NGridItem>
 
       <NGridItem :span="1" class="sessions-grid-item">
-        <NCard title="会话操作" class="sessions-card sessions-side-card">
+        <NCard :title="t('pages.sessions.list.actionsTitle')" class="sessions-card sessions-side-card">
           <template v-if="selectedSession">
             <NSpace vertical :size="10">
               <div class="session-selected-key">
@@ -379,70 +381,70 @@ async function handleExport(session: SessionRow) {
                 <NTag size="small" type="info" :bordered="false">{{ selectedSession.parsed.agent }}</NTag>
                 <NTag size="small" :bordered="false">{{ selectedSession.parsed.channel }}</NTag>
                 <NTag size="small" :bordered="false" :type="selectedSession.active24h ? 'success' : 'default'">
-                  {{ selectedSession.active24h ? '24h 活跃' : '非活跃' }}
+                  {{ selectedSession.active24h ? t('pages.sessions.list.badges.active24h') : t('pages.sessions.list.badges.inactive') }}
                 </NTag>
               </NSpace>
 
               <div class="session-meta-grid">
                 <div class="session-meta-item">
-                  <NText depth="3">对话方</NText>
+                  <NText depth="3">{{ t('pages.sessions.list.meta.peer') }}</NText>
                   <div class="session-meta-value">{{ selectedSession.parsed.peer || '-' }}</div>
                 </div>
                 <div class="session-meta-item">
-                  <NText depth="3">消息数</NText>
+                  <NText depth="3">{{ t('pages.sessions.list.meta.messageCount') }}</NText>
                   <div class="session-meta-value">{{ selectedSession.messageCount }}</div>
                 </div>
                 <div class="session-meta-item">
-                  <NText depth="3">模型</NText>
+                  <NText depth="3">{{ t('pages.sessions.list.meta.model') }}</NText>
                   <div class="session-meta-value">{{ selectedSession.model || '-' }}</div>
                 </div>
                 <div class="session-meta-item">
-                  <NText depth="3">最近活动</NText>
+                  <NText depth="3">{{ t('pages.sessions.list.meta.lastActivity') }}</NText>
                   <div class="session-meta-value">{{ selectedSession.lastActivity ? formatRelativeTime(selectedSession.lastActivity) : '-' }}</div>
                 </div>
               </div>
 
               <NText depth="3" style="font-size: 12px;">
-                活动时间：{{ selectedSession.lastActivity ? formatDate(selectedSession.lastActivity) : '-' }}
+                {{ t('pages.sessions.list.activeTime', { time: selectedSession.lastActivity ? formatDate(selectedSession.lastActivity) : '-' }) }}
               </NText>
 
               <NSpace :size="8" wrap>
                 <NButton size="small" type="primary" @click="handleView(selectedSession)">
                   <template #icon><NIcon :component="EyeOutline" /></template>
-                  查看详情
+                  {{ t('pages.sessions.list.viewDetail') }}
                 </NButton>
                 <NButton size="small" @click="handleExport(selectedSession)">
                   <template #icon><NIcon :component="DownloadOutline" /></template>
-                  导出
+                  {{ t('common.export') }}
                 </NButton>
                 <NPopconfirm @positive-click="handleReset(selectedSession)">
                   <template #trigger>
                     <NButton size="small">
                       <template #icon><NIcon :component="RefreshOutline" /></template>
-                      重置
+                      {{ t('common.reset') }}
                     </NButton>
                   </template>
-                  确认重置该会话？
+                  {{ t('pages.sessions.list.confirmReset') }}
                 </NPopconfirm>
                 <NPopconfirm @positive-click="handleDelete(selectedSession)">
                   <template #trigger>
                     <NButton size="small" type="error">
                       <template #icon><NIcon :component="TrashOutline" /></template>
-                      删除
+                      {{ t('common.delete') }}
                     </NButton>
                   </template>
-                  确认删除该会话？此操作不可撤销。
+                  {{ t('pages.sessions.detail.confirmDelete') }}
                 </NPopconfirm>
               </NSpace>
 
               <NAlert type="default" :bordered="false">
-                当前会话摘要：{{ truncate(selectedSession.parsed.peer || selectedSession.key, 56) }}
+                {{ t('pages.sessions.list.summary', { text: truncate(selectedSession.parsed.peer || selectedSession.key, 56) }) }}
               </NAlert>
             </NSpace>
           </template>
 
           <div v-else class="sessions-empty-side">
-            从左侧选择会话后，可进行查看详情、导出、重置或删除。
+            {{ t('pages.sessions.list.emptySide') }}
           </div>
         </NCard>
       </NGridItem>

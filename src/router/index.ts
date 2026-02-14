@@ -48,10 +48,6 @@ function applyAuthFromUrl(authStore: ReturnType<typeof useAuthStore>): void {
 }
 
 router.beforeEach((to, _from, next) => {
-  // Set page title
-  const title = to.meta.title as string | undefined
-  document.title = title ? `${title} - OpenClaw Admin` : 'OpenClaw Admin'
-
   const authStore = useAuthStore()
   applyAuthFromUrl(authStore)
 

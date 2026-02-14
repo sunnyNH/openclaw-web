@@ -15,6 +15,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { SaveOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore, type ThemeMode } from '@/stores/theme'
 import { useWebSocketStore } from '@/stores/websocket'
@@ -24,6 +25,7 @@ const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const wsStore = useWebSocketStore()
 const message = useMessage()
+const { t } = useI18n()
 
 const gatewayUrl = ref(authStore.gatewayUrl)
 const token = ref(authStore.token)
@@ -37,21 +39,21 @@ const gatewaySchemeHint = computed(() => {
   if (!url) return ''
   if (!isHttpsPage.value) return ''
   if (!url.toLowerCase().startsWith('ws://')) return ''
-  return '当前页面为 HTTPS，浏览器会拦截 ws:// WebSocket。请改用 wss:// 地址，或使用 SSH 隧道后连接 ws://127.0.0.1:18789。'
+  return t('common.httpsWsBlocked')
 })
 
-const themeOptions = [
-  { label: '浅色模式', value: 'light' },
-  { label: '深色模式', value: 'dark' },
-]
+const themeOptions = computed(() => ([
+  { label: t('pages.settings.themeLight'), value: 'light' },
+  { label: t('pages.settings.themeDark'), value: 'dark' },
+]))
 
 const connectionStatus = computed(() => {
   switch (wsStore.state) {
-    case ConnectionState.CONNECTED: return { text: '已连接', type: 'success' as const }
-    case ConnectionState.CONNECTING: return { text: '连接中...', type: 'info' as const }
-    case ConnectionState.RECONNECTING: return { text: `重连中 (第 ${wsStore.reconnectAttempts} 次)`, type: 'warning' as const }
-    case ConnectionState.FAILED: return { text: '连接失败', type: 'error' as const }
-    default: return { text: '已断开', type: 'error' as const }
+    case ConnectionState.CONNECTED: return { text: t('pages.settings.statusConnected'), type: 'success' as const }
+    case ConnectionState.CONNECTING: return { text: t('pages.settings.statusConnecting'), type: 'info' as const }
+    case ConnectionState.RECONNECTING: return { text: t('pages.settings.statusReconnecting', { count: wsStore.reconnectAttempts }), type: 'warning' as const }
+    case ConnectionState.FAILED: return { text: t('pages.settings.statusFailed'), type: 'error' as const }
+    default: return { text: t('pages.settings.statusDisconnected'), type: 'error' as const }
   }
 })
 
@@ -75,7 +77,7 @@ function waitForReconnect(timeout = 12000): Promise<void> {
 
     const onFailure = (reason: unknown) => {
       cleanupAll()
-      reject(new Error(String(reason || '连接失败')))
+      reject(new Error(String(reason || t('pages.settings.connectionFailed'))))
     }
 
     cleanups.push(wsStore.subscribe('connected', onSuccess))
@@ -83,7 +85,7 @@ function waitForReconnect(timeout = 12000): Promise<void> {
     cleanups.push(wsStore.subscribe('error', onFailure))
 
     timer = setTimeout(() => {
-      onFailure('重连超时')
+      onFailure(t('pages.settings.reconnectTimeout'))
     }, timeout)
   })
 }
@@ -101,9 +103,9 @@ async function saveConnectionSettings() {
 
   try {
     await reconnectPromise
-    message.success('连接设置已保存并重连成功')
+    message.success(t('pages.settings.savedAndReconnected'))
   } catch (error) {
-    message.error((error as Error).message || '连接失败')
+    message.error((error as Error).message || t('pages.settings.connectionFailed'))
   } finally {
     savingConnection.value = false
   }
@@ -116,34 +118,34 @@ function handleThemeChange(mode: ThemeMode) {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="连接设置" class="app-card">
+    <NCard :title="t('pages.settings.connectionSettings')" class="app-card">
       <NAlert :type="connectionStatus.type" :bordered="false" style="margin-bottom: 16px;">
-        当前状态：{{ connectionStatus.text }}
+        {{ t('pages.settings.currentStatus', { status: connectionStatus.text }) }}
         <span v-if="wsStore.lastError">（{{ wsStore.lastError }}）</span>
       </NAlert>
 
       <NForm label-placement="left" label-width="120" style="max-width: 500px;">
-        <NFormItem label="Gateway 地址">
-          <NInput v-model:value="gatewayUrl" placeholder="ws://127.0.0.1:18789" />
+        <NFormItem :label="t('pages.settings.gatewayUrlLabel')">
+          <NInput v-model:value="gatewayUrl" :placeholder="t('pages.settings.gatewayUrlPlaceholder')" />
         </NFormItem>
         <NAlert v-if="gatewaySchemeHint" type="warning" :bordered="false" style="margin: -8px 0 16px;">
           {{ gatewaySchemeHint }}
         </NAlert>
-        <NFormItem label="Token">
-          <NInput v-model:value="token" type="password" show-password-on="click" placeholder="Gateway Token" />
+        <NFormItem :label="t('pages.settings.tokenLabel')">
+          <NInput v-model:value="token" type="password" show-password-on="click" :placeholder="t('pages.settings.tokenPlaceholder')" />
         </NFormItem>
         <NFormItem>
           <NButton type="primary" :loading="savingConnection" @click="saveConnectionSettings">
             <template #icon><NIcon :component="SaveOutline" /></template>
-            保存并重连
+            {{ t('pages.settings.saveAndReconnect') }}
           </NButton>
         </NFormItem>
       </NForm>
     </NCard>
 
-    <NCard title="外观设置" class="app-card">
+    <NCard :title="t('pages.settings.appearanceSettings')" class="app-card">
       <NForm label-placement="left" label-width="120" style="max-width: 500px;">
-        <NFormItem label="主题模式">
+        <NFormItem :label="t('pages.settings.themeMode')">
           <NSelect
             :value="themeStore.mode"
             :options="themeOptions"
@@ -153,14 +155,14 @@ function handleThemeChange(mode: ThemeMode) {
       </NForm>
     </NCard>
 
-    <NCard title="关于" class="app-card">
+    <NCard :title="t('pages.settings.about')" class="app-card">
       <NSpace vertical :size="8">
         <NText>OpenClaw Admin v0.1.0</NText>
         <NText depth="3" style="font-size: 13px;">
-          OpenClaw Gateway 管理后台
+          {{ t('pages.settings.aboutLine1') }}
         </NText>
         <NText depth="3" style="font-size: 13px;">
-          基于 Vue 3 + Naive UI 构建
+          {{ t('pages.settings.aboutLine2') }}
         </NText>
       </NSpace>
     </NCard>

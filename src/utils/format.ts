@@ -1,3 +1,5 @@
+import { getPreferredLocale, type AppLocale } from '@/i18n/locale'
+
 function normalizeDateInput(date: string | number | Date): Date | null {
   if (date instanceof Date) {
     return Number.isFinite(date.getTime()) ? date : null
@@ -31,7 +33,7 @@ export function formatDate(date: string | number | Date): string {
     return typeof date === 'string' && date.trim() ? date : '-'
   }
 
-  return parsed.toLocaleString('zh-CN', {
+  return parsed.toLocaleString(getPreferredLocale(), {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -47,21 +49,36 @@ export function formatRelativeTime(date: string | number | Date): string {
     return typeof date === 'string' && date.trim() ? date : '-'
   }
 
+  const locale: AppLocale = getPreferredLocale()
   const now = Date.now()
   const diff = now - parsed.getTime()
   if (diff < 0) {
     const ahead = Math.abs(diff)
-    if (ahead < 60000) return '即将'
-    if (ahead < 3600000) return `${Math.ceil(ahead / 60000)} 分钟后`
-    if (ahead < 86400000) return `${Math.ceil(ahead / 3600000)} 小时后`
-    if (ahead < 2592000000) return `${Math.ceil(ahead / 86400000)} 天后`
+    if (locale === 'zh-CN') {
+      if (ahead < 60000) return '即将'
+      if (ahead < 3600000) return `${Math.ceil(ahead / 60000)} 分钟后`
+      if (ahead < 86400000) return `${Math.ceil(ahead / 3600000)} 小时后`
+      if (ahead < 2592000000) return `${Math.ceil(ahead / 86400000)} 天后`
+    } else {
+      if (ahead < 60000) return 'Soon'
+      if (ahead < 3600000) return `in ${Math.ceil(ahead / 60000)} min`
+      if (ahead < 86400000) return `in ${Math.ceil(ahead / 3600000)} hr`
+      if (ahead < 2592000000) return `in ${Math.ceil(ahead / 86400000)} day`
+    }
     return formatDate(date)
   }
 
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-  if (diff < 2592000000) return `${Math.floor(diff / 86400000)} 天前`
+  if (locale === 'zh-CN') {
+    if (diff < 60000) return '刚刚'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
+    if (diff < 2592000000) return `${Math.floor(diff / 86400000)} 天前`
+  } else {
+    if (diff < 60000) return 'Just now'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} hr ago`
+    if (diff < 2592000000) return `${Math.floor(diff / 86400000)} day ago`
+  }
   return formatDate(date)
 }
 

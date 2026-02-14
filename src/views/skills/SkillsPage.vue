@@ -15,10 +15,12 @@ import {
   NSpin,
 } from 'naive-ui'
 import { RefreshOutline, SearchOutline } from '@vicons/ionicons5'
+import { useI18n } from 'vue-i18n'
 import { useSkillStore } from '@/stores/skill'
 import type { Skill } from '@/api/types'
 
 const skillStore = useSkillStore()
+const { t } = useI18n()
 const searchQuery = ref('')
 
 onMounted(() => {
@@ -46,10 +48,10 @@ function matchesQuery(skill: Skill): boolean {
 
 function sourceLabel(source: Skill['source']): string {
   switch (source) {
-    case 'workspace': return '用户创建'
-    case 'managed': return '用户安装'
-    case 'extra': return '外部插件'
-    case 'bundled': return '内置'
+    case 'workspace': return t('pages.skills.sources.workspace')
+    case 'managed': return t('pages.skills.sources.managed')
+    case 'extra': return t('pages.skills.sources.extra')
+    case 'bundled': return t('pages.skills.sources.bundled')
     default: return source
   }
 }
@@ -92,9 +94,9 @@ const pluginGroups = computed(() => {
   const groups = [
     {
       key: 'user',
-      title: '我创建的插件',
-      description: '来自 workspace / 托管源 / 额外目录',
-      emptyText: '当前没有用户插件',
+      title: t('pages.skills.groups.user.title'),
+      description: t('pages.skills.groups.user.description'),
+      emptyText: t('pages.skills.groups.user.empty'),
       skills: userVisiblePlugins.value,
     },
   ]
@@ -102,9 +104,9 @@ const pluginGroups = computed(() => {
   if (skillStore.showBundled) {
     groups.push({
       key: 'bundled',
-      title: '系统内置插件',
-      description: '随 OpenClaw 一起提供（可控制是否在 Chat 中可选）',
-      emptyText: '当前没有内置插件',
+      title: t('pages.skills.groups.bundled.title'),
+      description: t('pages.skills.groups.bundled.description'),
+      emptyText: t('pages.skills.groups.bundled.empty'),
       skills: bundledPlugins.value,
     })
   }
@@ -115,54 +117,54 @@ const pluginGroups = computed(() => {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="技能管理" class="app-card">
+    <NCard :title="t('pages.skills.title')" class="app-card">
       <template #header-extra>
         <NSpace :size="8" class="app-toolbar">
           <NSpace :size="8" align="center">
-            <NText depth="3" style="font-size: 12px;">显示内置</NText>
+            <NText depth="3" style="font-size: 12px;">{{ t('pages.skills.showBundled') }}</NText>
             <NSwitch v-model:value="skillStore.showBundled" size="small" />
           </NSpace>
           <NSpace :size="8" align="center">
-            <NText depth="3" style="font-size: 12px;">Chat 显示内置</NText>
+            <NText depth="3" style="font-size: 12px;">{{ t('pages.skills.showBundledInChat') }}</NText>
             <NSwitch v-model:value="skillStore.showBundledInChat" size="small" />
           </NSpace>
           <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" @click="skillStore.fetchSkills()">
             <template #icon><NIcon :component="RefreshOutline" /></template>
-            刷新
+            {{ t('common.refresh') }}
           </NButton>
         </NSpace>
       </template>
 
       <NSpace vertical :size="14">
         <NAlert type="info" :show-icon="true" style="border-radius: var(--radius);">
-          展示当前 Gateway 已加载的技能插件（含内置与用户插件），可通过开关控制内置插件展示与 Chat 可见性。
+          {{ t('pages.skills.info') }}
         </NAlert>
         <NAlert v-if="skillStore.error" type="error" :show-icon="true" style="border-radius: var(--radius);">
-          技能数据加载失败：{{ skillStore.error }}
+          {{ t('pages.skills.loadFailed', { error: skillStore.error }) }}
         </NAlert>
 
         <NGrid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="12">
           <NGridItem>
             <NCard embedded :bordered="false" style="border-radius: var(--radius);">
-              <NText depth="3" style="font-size: 12px;">技能总数</NText>
+              <NText depth="3" style="font-size: 12px;">{{ t('pages.skills.stats.total') }}</NText>
               <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ availableTotalPlugins }}</div>
             </NCard>
           </NGridItem>
           <NGridItem>
             <NCard embedded :bordered="false" style="border-radius: var(--radius);">
-              <NText depth="3" style="font-size: 12px;">系统内置（可用）</NText>
+              <NText depth="3" style="font-size: 12px;">{{ t('pages.skills.stats.bundledAvailable') }}</NText>
               <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ bundledAvailablePlugins.length }}</div>
             </NCard>
           </NGridItem>
           <NGridItem>
             <NCard embedded :bordered="false" style="border-radius: var(--radius);">
-              <NText depth="3" style="font-size: 12px;">我创建的插件</NText>
+              <NText depth="3" style="font-size: 12px;">{{ t('pages.skills.stats.user') }}</NText>
               <div style="font-size: 22px; font-weight: 600; margin-top: 6px;">{{ userPlugins.length }}</div>
             </NCard>
           </NGridItem>
         </NGrid>
 
-        <NInput v-model:value="searchQuery" clearable placeholder="搜索插件名称 / 描述 / 版本号">
+        <NInput v-model:value="searchQuery" clearable :placeholder="t('pages.skills.searchPlaceholder')">
           <template #prefix><NIcon :component="SearchOutline" /></template>
         </NInput>
       </NSpace>
@@ -181,7 +183,7 @@ const pluginGroups = computed(() => {
                 <NText strong>{{ group.title }}</NText>
                 <NText depth="3" style="font-size: 12px;">{{ group.description }}</NText>
               </NSpace>
-              <NTag size="small" round :bordered="false">{{ group.skills.length }} 个</NTag>
+              <NTag size="small" round :bordered="false">{{ t('common.itemsCount', { count: group.skills.length }) }}</NTag>
             </NSpace>
 
             <NGrid v-if="group.skills.length > 0" cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="12">
@@ -195,18 +197,18 @@ const pluginGroups = computed(() => {
                           {{ sourceLabel(skill.source) }}
                         </NTag>
                         <NTag v-if="skill.hasUpdate" type="warning" size="tiny" :bordered="false" round>
-                          有更新
+                          {{ t('pages.skills.hasUpdate') }}
                         </NTag>
                       </NSpace>
                     </NSpace>
 
                     <NText depth="3" class="skill-desc">
-                      {{ skill.description || '暂无描述' }}
+                      {{ skill.description || t('common.noDescription') }}
                     </NText>
 
                     <NSpace justify="space-between" align="center">
                       <NText depth="3" style="font-size: 12px;">
-                        {{ skill.version ? `v${skill.version}` : '未标注版本' }}
+                        {{ skill.version ? t('pages.skills.version', { version: skill.version }) : t('pages.skills.noVersion') }}
                       </NText>
                       <NSpace :size="10" align="center">
                         <NSpace :size="6" align="center">
@@ -223,7 +225,7 @@ const pluginGroups = computed(() => {
                           :bordered="false"
                           round
                         >
-                          {{ skill.eligible === false ? '缺依赖/受限' : '可用' }}
+                          {{ skill.eligible === false ? t('pages.skills.eligibleRestricted') : t('pages.skills.eligibleOk') }}
                         </NTag>
                       </NSpace>
                     </NSpace>
@@ -245,7 +247,7 @@ const pluginGroups = computed(() => {
           v-if="!skillStore.loading && visiblePlugins.length === 0"
           style="text-align: center; padding: 56px 0; color: var(--text-secondary);"
         >
-          没有匹配的技能插件
+          {{ t('pages.skills.noMatches') }}
         </div>
       </NSpin>
     </NCard>
