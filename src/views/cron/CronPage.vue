@@ -40,20 +40,29 @@ import {
   SearchOutline,
 } from '@vicons/ionicons5'
 import { useCronStore } from '@/stores/cron'
+import { useConfigStore } from '@/stores/config'
+import { useModelStore } from '@/stores/model'
+import { useSessionStore } from '@/stores/session'
 import type {
   CronDelivery,
   CronJob,
+  ModelInfo,
   CronPayload,
   CronRunLogEntry,
   CronSchedule,
   CronUpsertParams,
 } from '@/api/types'
-import { formatDate, formatRelativeTime, truncate } from '@/utils/format'
+import { formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
 
 type ScheduleKind = 'cron' | 'every' | 'at'
 type EveryUnit = 'minutes' | 'hours' | 'days'
 type StatusFilter = 'all' | 'enabled' | 'disabled'
+type ParsedModelRef = {
+  modelRef: string
+  providerId: string
+  modelId: string
+}
 type CronTemplatePreset = {
   id: string
   label: string
@@ -69,6 +78,9 @@ type CronTemplatePreset = {
 }
 
 const cronStore = useCronStore()
+const configStore = useConfigStore()
+const modelStore = useModelStore()
+const sessionStore = useSessionStore()
 const router = useRouter()
 const message = useMessage()
 
@@ -127,16 +139,21 @@ const everyUnitOptions: Array<{ label: string; value: EveryUnit }> = [
   { label: '天', value: 'days' },
 ]
 
-const deliveryChannelOptions: SelectOption[] = [
-  { label: 'last（沿用最近回复渠道）', value: 'last' },
-  { label: 'whatsapp', value: 'whatsapp' },
-  { label: 'telegram', value: 'telegram' },
-  { label: 'discord', value: 'discord' },
-  { label: 'slack', value: 'slack' },
-  { label: 'mattermost', value: 'mattermost' },
-  { label: 'signal', value: 'signal' },
-  { label: 'imessage', value: 'imessage' },
-]
+const deliveryChannelLabelMap: Record<string, string> = {
+  whatsapp: 'WhatsApp',
+  telegram: 'Telegram',
+  discord: 'Discord',
+  slack: 'Slack',
+  mattermost: 'Mattermost',
+  signal: 'Signal',
+  imessage: 'iMessage',
+  qqbot: 'QQ Bot',
+  qq: 'QQ',
+  wecom: '企业微信',
+  wechat: '微信',
+  dingtalk: '钉钉',
+  feishu: '飞书',
+}
 
 const form = reactive({
   name: '',
@@ -194,6 +211,314 @@ const hasJobs = computed(() => cronStore.jobs.length > 0)
 const selectedJob = computed(() =>
   cronStore.jobs.find((job) => job.id === cronStore.selectedJobId) || null
 )
+
+const defaultModelRef = computed(() => {
+  const fromModelsPrimary = configStore.config?.models?.primary?.trim() || ''
+  if (fromModelsPrimary) return fromModelsPrimary
+  const fromAgentPrimary = configStore.config?.agents?.defaults?.model?.primary?.trim() || ''
+  if (fromAgentPrimary) return fromAgentPrimary
+  return configuredModelRefs.value[0] || ''
+})
+
+const selectedJobModelText = computed(() => {
+  const payload = selectedJob.value?.payload
+  if (!payload || payload.kind !== 'agentTurn') return '-'
+  const overrideModel = payload.model?.trim() || ''
+  if (overrideModel) return overrideModel
+  return defaultModelRef.value ? `默认（${defaultModelRef.value}）` : '默认模型（未配置）'
+})
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return null
+}
+
+function normalizeChannelKey(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => !!item && item !== '*')
+}
+
+function isConfiguredChannelEnabled(value: unknown): boolean {
+  const row = toRecord(value)
+  if (!row) return false
+  return row.enabled !== false
+}
+
+function formatDeliveryChannelLabel(channelKey: string): string {
+  const normalized = normalizeChannelKey(channelKey)
+  return deliveryChannelLabelMap[normalized] || normalized
+}
+
+function collectConfiguredTargets(input: unknown, output: Set<string>) {
+  const row = toRecord(input)
+  if (!row) return
+
+  for (const target of asStringArray(row.allowFrom)) {
+    output.add(target)
+  }
+  for (const target of asStringArray(row.groupAllowFrom)) {
+    output.add(target)
+  }
+
+  const groups = toRecord(row.groups)
+  if (!groups) return
+
+  for (const [groupId, groupValue] of Object.entries(groups)) {
+    const normalizedGroupId = groupId.trim()
+    if (!normalizedGroupId) continue
+    output.add(normalizedGroupId)
+
+    const groupRow = toRecord(groupValue)
+    const topics = toRecord(groupRow?.topics)
+    if (!topics) continue
+    for (const topicId of Object.keys(topics)) {
+      const normalizedTopicId = topicId.trim()
+      if (!normalizedTopicId) continue
+      output.add(`${normalizedGroupId}:topic:${normalizedTopicId}`)
+    }
+  }
+}
+
+const configuredChannelConfigMap = computed<Record<string, unknown>>(() => {
+  const source = toRecord(configStore.config?.channels)
+  const map: Record<string, unknown> = {}
+  if (!source) return map
+  for (const [channelKey, channelValue] of Object.entries(source)) {
+    const normalized = normalizeChannelKey(channelKey)
+    if (!normalized) continue
+    map[normalized] = channelValue
+  }
+  return map
+})
+
+const deliveryChannelOptions = computed<SelectOption[]>(() => {
+  const options: SelectOption[] = [{ label: 'last（沿用最近回复渠道）', value: 'last' }]
+  const seen = new Set<string>(['last'])
+  const channels = configuredChannelConfigMap.value
+  if (channels) {
+    const configured = Object.entries(channels)
+      .filter(([, value]) => isConfiguredChannelEnabled(value))
+      .map(([channelKey]) => channelKey.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+
+    for (const channelKey of configured) {
+      const normalized = normalizeChannelKey(channelKey)
+      if (seen.has(normalized)) continue
+      seen.add(normalized)
+      options.push({
+        label: formatDeliveryChannelLabel(channelKey),
+        value: channelKey,
+      })
+    }
+  }
+
+  const currentValue = form.deliveryChannel.trim()
+  const currentKey = normalizeChannelKey(currentValue)
+  if (currentValue && !seen.has(currentKey)) {
+    options.push({
+      label: `${formatDeliveryChannelLabel(currentValue)}（当前值）`,
+      value: currentValue,
+    })
+  }
+
+  return options
+})
+
+const deliveryTargetOptions = computed<SelectOption[]>(() => {
+  const targetSet = new Set<string>()
+  const options: SelectOption[] = []
+  const channelKey = normalizeChannelKey(form.deliveryChannel)
+  if (channelKey && channelKey !== 'last') {
+    const channelConfig = configuredChannelConfigMap.value[channelKey]
+    collectConfiguredTargets(channelConfig, targetSet)
+
+    const row = toRecord(channelConfig)
+    const accounts = toRecord(row?.accounts)
+    if (accounts) {
+      for (const accountConfig of Object.values(accounts)) {
+        collectConfiguredTargets(accountConfig, targetSet)
+      }
+    }
+
+    for (const session of sessionStore.sessions) {
+      const parsed = parseSessionKey(session.key)
+      const sessionChannel = normalizeChannelKey(session.channel || parsed.channel)
+      if (sessionChannel !== channelKey) continue
+
+      const peers = [session.peer, parsed.peer]
+        .map((item) => item?.trim() || '')
+        .filter(Boolean)
+
+      const hasPrefixedPeer = peers.some((peer) => peer.includes(':'))
+      for (const peer of peers) {
+        if (hasPrefixedPeer && !peer.includes(':')) continue
+        targetSet.add(peer)
+      }
+
+      if (channelKey === 'qqbot') {
+        const key = session.key.toLowerCase()
+        const qqTargetPrefix = key.includes(':group:') || key.includes(':channel:') ? 'group' : 'user'
+        for (const peer of peers) {
+          if (!peer || peer.includes(':')) continue
+          targetSet.add(`${qqTargetPrefix}:${peer}`)
+        }
+      }
+    }
+  }
+
+  for (const target of Array.from(targetSet).sort((a, b) => a.localeCompare(b))) {
+    options.push({ label: target, value: target })
+  }
+
+  const current = form.deliveryTo.trim()
+  if (current && !targetSet.has(current)) {
+    options.unshift({
+      label: `${current}（当前值）`,
+      value: current,
+    })
+  }
+
+  return options
+})
+
+function splitModelRef(value: string): ParsedModelRef | null {
+  const text = value.trim()
+  const slashIndex = text.indexOf('/')
+  if (slashIndex <= 0 || slashIndex >= text.length - 1) return null
+  const providerId = text.slice(0, slashIndex).trim()
+  const modelId = text.slice(slashIndex + 1).trim()
+  if (!providerId || !modelId) return null
+  return {
+    modelRef: `${providerId}/${modelId}`,
+    providerId,
+    modelId,
+  }
+}
+
+function collectConfiguredModelRefs(input: unknown, refs: Set<string>) {
+  if (!input) return
+
+  if (typeof input === 'string') {
+    const parsed = splitModelRef(input)
+    if (parsed) refs.add(parsed.modelRef)
+    return
+  }
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      collectConfiguredModelRefs(item, refs)
+    }
+    return
+  }
+
+  const row = toRecord(input)
+  if (!row) return
+
+  for (const candidate of [row.id, row.model, row.ref, row.primary]) {
+    if (typeof candidate === 'string') {
+      const parsed = splitModelRef(candidate)
+      if (parsed) refs.add(parsed.modelRef)
+    }
+  }
+
+  for (const [key, value] of Object.entries(row)) {
+    const keyParsed = splitModelRef(key)
+    if (keyParsed) refs.add(keyParsed.modelRef)
+    if (typeof value === 'string') {
+      const valueParsed = splitModelRef(value)
+      if (valueParsed) refs.add(valueParsed.modelRef)
+    }
+  }
+}
+
+const configuredModelRefs = computed<string[]>(() => {
+  const refs = new Set<string>()
+  const defaultsRaw = toRecord(configStore.config?.agents?.defaults)
+  const defaultsModelRaw = toRecord(defaultsRaw?.model)
+  collectConfiguredModelRefs(configStore.config?.models?.primary, refs)
+  collectConfiguredModelRefs(configStore.config?.models?.fallback, refs)
+  collectConfiguredModelRefs(defaultsRaw?.models, refs)
+  collectConfiguredModelRefs(defaultsModelRaw?.primary, refs)
+  collectConfiguredModelRefs(defaultsModelRaw?.fallback, refs)
+  collectConfiguredModelRefs(defaultsModelRaw?.fallbacks, refs)
+  return Array.from(refs).sort((a, b) => a.localeCompare(b))
+})
+
+const runtimeModelMap = computed<Map<string, ModelInfo>>(() => {
+  const map = new Map<string, ModelInfo>()
+  for (const model of modelStore.models) {
+    if (model.available === false) continue
+    const modelId = model.id.trim()
+    if (!modelId) continue
+    if (!map.has(modelId)) {
+      map.set(modelId, model)
+    }
+    const providerId = model.provider?.trim()
+    if (!providerId) continue
+    const modelRef = `${providerId}/${modelId}`
+    if (!map.has(modelRef)) {
+      map.set(modelRef, model)
+    }
+  }
+  return map
+})
+
+const runtimeModelOptions = computed<SelectOption[]>(() => {
+  const seen = new Set<string>()
+  return [...modelStore.models]
+    .filter((item) => item.available !== false)
+    .sort((a, b) => {
+      const left = `${a.provider || ''}/${a.id}`
+      const right = `${b.provider || ''}/${b.id}`
+      return left.localeCompare(right)
+    })
+    .flatMap((item) => {
+      const id = item.id.trim()
+      if (!id || seen.has(id)) return []
+      seen.add(id)
+      return [
+        {
+          label: formatModelOptionLabel(item),
+          value: id,
+        },
+      ]
+    })
+})
+
+const configuredModelOptions = computed<SelectOption[]>(() => {
+  return configuredModelRefs.value.map((modelRef) => {
+    const runtime = resolveRuntimeModel(modelRef)
+    return {
+      label: formatConfiguredModelOptionLabel(modelRef, runtime),
+      value: modelRef,
+    }
+  })
+})
+
+const modelSelectOptions = computed<SelectOption[]>(() => {
+  const options =
+    configuredModelOptions.value.length > 0
+      ? [...configuredModelOptions.value]
+      : [...runtimeModelOptions.value]
+  const current = form.model.trim()
+  if (current && !options.some((option) => option.value === current)) {
+    options.unshift({
+      label: `${current}（当前值）`,
+      value: current,
+    })
+  }
+  return options
+})
 
 const selectedJobPayloadText = computed(() => {
   const payload = selectedJob.value?.payload
@@ -439,12 +764,40 @@ const runColumns: DataTableColumns<CronRunLogEntry> = [
 ]
 
 onMounted(async () => {
-  await cronStore.fetchOverview()
+  await Promise.all([
+    cronStore.fetchOverview(),
+    modelStore.fetchModels(),
+    configStore.fetchConfig(),
+    sessionStore.fetchSessions(),
+  ])
   const firstJob = cronStore.jobs[0]
   if (firstJob) {
     await cronStore.fetchRuns(firstJob.id)
   }
 })
+
+function formatModelOptionLabel(model: ModelInfo): string {
+  const base = model.label && model.label !== model.id
+    ? `${model.label}（${model.id}）`
+    : model.id
+  if (!model.provider) return base
+  return `${base} · ${model.provider}`
+}
+
+function resolveRuntimeModel(modelRef: string): ModelInfo | null {
+  const byExactRef = runtimeModelMap.value.get(modelRef)
+  if (byExactRef) return byExactRef
+  const parsed = splitModelRef(modelRef)
+  if (!parsed) return null
+  return runtimeModelMap.value.get(parsed.modelId) || null
+}
+
+function formatConfiguredModelOptionLabel(modelRef: string, model: ModelInfo | null): string {
+  if (!model) return modelRef
+  const readable = model.label && model.label !== model.id ? model.label : ''
+  if (!readable) return modelRef
+  return `${modelRef} · ${readable}`
+}
 
 watch(
   () => form.sessionTarget,
@@ -472,6 +825,16 @@ watch(
   }
 )
 
+watch(
+  () => defaultModelRef.value,
+  (modelRef) => {
+    if (!showModal.value || !modelRef) return
+    if (form.payloadKind !== 'agentTurn') return
+    if (form.model.trim()) return
+    form.model = modelRef
+  }
+)
+
 function resetForm() {
   form.name = ''
   form.description = ''
@@ -488,7 +851,7 @@ function resetForm() {
   form.wakeMode = 'next-heartbeat'
   form.payloadKind = 'agentTurn'
   form.payloadText = ''
-  form.model = ''
+  form.model = defaultModelRef.value || ''
   form.thinking = ''
   form.timeoutSeconds = 120
   form.deliveryMode = 'announce'
@@ -566,7 +929,9 @@ function fillFormByJob(job: CronJob) {
   } else {
     form.payloadKind = 'agentTurn'
     form.payloadText = job.payload?.kind === 'agentTurn' ? job.payload.message : ''
-    form.model = job.payload?.kind === 'agentTurn' ? (job.payload.model || '') : ''
+    form.model = job.payload?.kind === 'agentTurn'
+      ? (job.payload.model || defaultModelRef.value || '')
+      : ''
     form.thinking = job.payload?.kind === 'agentTurn' ? (job.payload.thinking || '') : ''
     form.timeoutSeconds = job.payload?.kind === 'agentTurn'
       ? (job.payload.timeoutSeconds || 120)
@@ -833,7 +1198,12 @@ function lastRunText(job: CronJob): string {
 }
 
 async function handleRefresh() {
-  await cronStore.fetchOverview()
+  await Promise.all([
+    cronStore.fetchOverview(),
+    modelStore.fetchModels(),
+    configStore.fetchConfig(),
+    sessionStore.fetchSessions(),
+  ])
   if (cronStore.selectedJobId) {
     await cronStore.fetchRuns(cronStore.selectedJobId)
   }
@@ -1076,6 +1446,10 @@ function jobRowProps(row: CronJob) {
                 <div class="cron-detail-value">{{ selectedJob.payload?.kind || '-' }}</div>
               </NGridItem>
               <NGridItem>
+                <NText depth="3">模型</NText>
+                <div class="cron-detail-value">{{ selectedJobModelText }}</div>
+              </NGridItem>
+              <NGridItem>
                 <NText depth="3">Agent</NText>
                 <div class="cron-detail-value">{{ selectedJob.agentId || '默认 Agent' }}</div>
               </NGridItem>
@@ -1295,15 +1669,36 @@ function jobRowProps(row: CronJob) {
         </NFormItem>
 
         <template v-if="form.payloadKind === 'agentTurn'">
-          <NGrid cols="1 s:3" responsive="screen" :x-gap="10">
+          <NAlert
+            v-if="configStore.lastError"
+            type="warning"
+            :show-icon="true"
+            :bordered="false"
+            style="margin-bottom: 10px;"
+          >
+            模型配置读取失败，暂时无法按 openclaw.json 过滤：{{ configStore.lastError }}
+          </NAlert>
+          <NAlert
+            v-if="modelStore.lastError"
+            type="warning"
+            :show-icon="true"
+            :bordered="false"
+            style="margin-bottom: 10px;"
+          >
+            模型列表拉取失败，可继续手动输入模型：{{ modelStore.lastError }}
+          </NAlert>
+          <NGrid cols="1 s:2" responsive="screen" :x-gap="10">
             <NGridItem>
               <NFormItem label="模型覆盖">
-                <NInput v-model:value="form.model" placeholder="例如：opus（可选）" />
-              </NFormItem>
-            </NGridItem>
-            <NGridItem>
-              <NFormItem label="思维级别">
-                <NInput v-model:value="form.thinking" placeholder="例如：low/high（可选）" />
+                <NSelect
+                  v-model:value="form.model"
+                  :options="modelSelectOptions"
+                  :loading="modelStore.loading"
+                  filterable
+                  tag
+                  clearable
+                  placeholder="选择可用模型，或输入别名（可选）"
+                />
               </NFormItem>
             </NGridItem>
             <NGridItem>
@@ -1346,10 +1741,16 @@ function jobRowProps(row: CronJob) {
             </NGridItem>
             <NGridItem>
               <NFormItem label="投递目标">
-                <NInput
+                <NSelect
                   v-model:value="form.deliveryTo"
                   :disabled="form.deliveryMode === 'none'"
-                  placeholder="例如：channel:C123 / -100xxx:topic:123"
+                  :options="deliveryTargetOptions"
+                  filterable
+                  tag
+                  clearable
+                  :placeholder="form.deliveryChannel === 'last'
+                    ? '可选：留空时沿用最近会话路由'
+                    : '选择已配置目标，或手动输入'"
                 />
               </NFormItem>
             </NGridItem>
