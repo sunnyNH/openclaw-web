@@ -1011,6 +1011,8 @@ export default {
         commands: {
           new: {
             description: '重置并启动新会话，可选指定模型',
+            defaultLabel: '不指定模型',
+            defaultDesc: '使用默认模型启动新会话',
           },
           skill: {
             description: '执行技能（自动提示你的技能列表）',

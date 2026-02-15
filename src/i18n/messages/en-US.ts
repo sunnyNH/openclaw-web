@@ -1011,6 +1011,8 @@ export default {
         commands: {
           new: {
             description: 'Reset and start a new session; optionally specify model',
+            defaultLabel: 'Default model',
+            defaultDesc: 'Start a new session with the default model',
           },
           skill: {
             description: 'Run a skill (auto suggests your skills)',

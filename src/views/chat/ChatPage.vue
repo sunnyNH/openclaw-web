@@ -311,7 +311,7 @@ interface ConfiguredModelOption {
 }
 
 interface SlashSuggestionItem {
-  kind: 'command' | 'skill' | 'model'
+  kind: 'command' | 'skill' | 'model' | 'new-model' | 'new-default'
   key: string
   preset?: SlashCommandPreset
   skill?: Skill
@@ -570,6 +570,7 @@ const slashCommandOptions = computed<SlashCommandPreset[]>(() => {
     return (item.aliases || []).some((alias) => alias.slice(1).toLowerCase().includes(query))
   })
 })
+const slashNewMode = computed(() => slashMode.value && slashCommandKeyword.value === 'new')
 const slashSkillMode = computed(() => slashMode.value && slashCommandKeyword.value === 'skill')
 const slashModelMode = computed(() =>
   slashMode.value && (slashCommandKeyword.value === 'model' || slashCommandKeyword.value === 'models')
@@ -769,6 +770,13 @@ const configuredModelOptions = computed<ConfiguredModelOption[]>(() => {
     .filter((item): item is ConfiguredModelOption => !!item)
 })
 
+function filterConfiguredModels(query: string, list: ConfiguredModelOption[]): ConfiguredModelOption[] {
+  if (!query) return list
+  return list.filter((model) =>
+    [model.modelRef, model.providerId, model.modelId].some((field) => field.toLowerCase().includes(query))
+  )
+}
+
 const slashModelQuery = computed(() => {
   if (!slashModelMode.value) return ''
   const args = normalizeSlashArguments(slashFirstLine.value)
@@ -778,16 +786,37 @@ const slashModelQuery = computed(() => {
 
 const slashModelOptions = computed<ConfiguredModelOption[]>(() => {
   if (!slashModelMode.value) return []
-  const query = slashModelQuery.value
-  const list = configuredModelOptions.value
-  if (!query) return list
-  return list.filter((model) =>
-    [model.modelRef, model.providerId, model.modelId].some((field) => field.toLowerCase().includes(query))
-  )
+  return filterConfiguredModels(slashModelQuery.value, configuredModelOptions.value)
+})
+
+const slashNewModelQuery = computed(() => {
+  if (!slashNewMode.value) return ''
+  const args = normalizeSlashArguments(slashFirstLine.value)
+  const firstToken = args.split(/\s+/)[0] || ''
+  return firstToken.toLowerCase()
+})
+
+const slashNewModelOptions = computed<ConfiguredModelOption[]>(() => {
+  if (!slashNewMode.value) return []
+  return filterConfiguredModels(slashNewModelQuery.value, configuredModelOptions.value)
 })
 
 const slashSuggestions = computed<SlashSuggestionItem[]>(() => {
   if (!slashMode.value) return []
+  if (slashNewMode.value) {
+    const defaults: SlashSuggestionItem[] = [
+      {
+        kind: 'new-default',
+        key: 'new-default',
+      },
+    ]
+    const models = slashNewModelOptions.value.map((model) => ({
+      kind: 'new-model',
+      key: `new-model-${model.modelRef}`,
+      model,
+    }))
+    return [...defaults, ...models]
+  }
   if (slashSkillMode.value) {
     return slashSkillOptions.value.map((skill) => ({
       kind: 'skill',
@@ -1536,6 +1565,21 @@ function applySlashModel(model: ConfiguredModelOption) {
   draft.value = lines.join('\n')
 }
 
+function applySlashNewModel(model: ConfiguredModelOption) {
+  const lines = draft.value.split('\n')
+  const args = normalizeSlashArguments(slashFirstLine.value)
+  const { rest } = splitFirstToken(args)
+  const modelRef = model.modelRef
+  lines[0] = rest ? `/new ${modelRef} ${rest}` : `/new ${modelRef}`
+  draft.value = lines.join('\n')
+}
+
+function applySlashNewDefault() {
+  const lines = draft.value.split('\n')
+  lines[0] = '/new'
+  draft.value = lines.join('\n')
+}
+
 function applySlashSuggestion(item: SlashSuggestionItem) {
   if (item.kind === 'skill' && item.skill) {
     applySlashSkill(item.skill)
@@ -1543,6 +1587,14 @@ function applySlashSuggestion(item: SlashSuggestionItem) {
   }
   if (item.kind === 'model' && item.model) {
     applySlashModel(item.model)
+    return
+  }
+  if (item.kind === 'new-model' && item.model) {
+    applySlashNewModel(item.model)
+    return
+  }
+  if (item.kind === 'new-default') {
+    applySlashNewDefault()
     return
   }
   if (item.kind === 'command' && item.preset) {
@@ -1604,6 +1656,28 @@ async function handleDraftKeydown(event: KeyboardEvent) {
           return
         }
         applySlashModel(item.model)
+        return
+      }
+
+      if (item.kind === 'new-model' && item.model) {
+        const args = normalizeSlashArguments(slashFirstLine.value)
+        const { first } = splitFirstToken(args)
+        const modelRef = item.model.modelRef.toLowerCase()
+        if (first && first.toLowerCase() === modelRef) {
+          await handleSend()
+          return
+        }
+        applySlashNewModel(item.model)
+        return
+      }
+
+      if (item.kind === 'new-default') {
+        const args = normalizeSlashArguments(slashFirstLine.value)
+        if (!args) {
+          await handleSend()
+          return
+        }
+        applySlashNewDefault()
         return
       }
 
@@ -2191,13 +2265,36 @@ async function handleSend() {
                           <span class="chat-slash-flag">{{ t('pages.chat.slash.fromConfig') }}</span>
                         </div>
                       </div>
+                      <div v-else-if="item.kind === 'new-model' && item.model">
+                        <div class="chat-slash-line">
+                          <span class="chat-slash-command">/new {{ item.model.modelRef }}</span>
+                          <NTag size="tiny" type="info" :bordered="false" round>
+                            {{ item.model.providerId }}
+                          </NTag>
+                        </div>
+                        <div class="chat-slash-line chat-slash-desc">
+                          <span>{{ item.model.modelId }}</span>
+                          <span class="chat-slash-flag">{{ t('pages.chat.slash.fromConfig') }}</span>
+                        </div>
+                      </div>
+                      <div v-else-if="item.kind === 'new-default'">
+                        <div class="chat-slash-line">
+                          <span class="chat-slash-command">/new</span>
+                          <NTag size="tiny" type="default" :bordered="false" round>
+                            {{ t('pages.chat.slash.commands.new.defaultLabel') }}
+                          </NTag>
+                        </div>
+                        <div class="chat-slash-line chat-slash-desc">
+                          <span>{{ t('pages.chat.slash.commands.new.defaultDesc') }}</span>
+                        </div>
+                      </div>
                     </button>
                   </div>
                   <div v-else class="chat-slash-empty">
                     <template v-if="slashSkillMode">
                       {{ skillStore.loading ? t('pages.chat.slash.skills.loading') : t('pages.chat.slash.skills.noMatch') }}
                     </template>
-                    <template v-else-if="slashModelMode">
+                    <template v-else-if="slashModelMode || slashNewMode">
                       {{ configStore.loading ? t('pages.chat.slash.models.loading') : t('pages.chat.slash.models.noMatch') }}
                     </template>
                     <template v-else>
