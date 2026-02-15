@@ -36,7 +36,10 @@ export class OpenClawWebSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private connectTimer: ReturnType<typeof setTimeout> | null = null
+  private connectSendTimer: ReturnType<typeof setTimeout> | null = null
   private pendingConnectId: string | null = null
+  private connectNonce: string | null = null
+  private connectSent = false
   private messageQueue: QueuedMessage[] = []
   private _state: ConnectionState = ConnectionState.DISCONNECTED
 
@@ -55,6 +58,8 @@ export class OpenClawWebSocket {
     this.setState(ConnectionState.CONNECTING)
     this.reconnectAttempts = 0
     this.pendingConnectId = null
+    this.connectNonce = null
+    this.connectSent = false
 
     this.createConnection()
   }
@@ -122,6 +127,50 @@ export class OpenClawWebSocket {
     })
   }
 
+  private queueConnectSend(): void {
+    if (this.connectSendTimer) {
+      clearTimeout(this.connectSendTimer)
+    }
+    this.connectSendTimer = setTimeout(() => {
+      void this.sendConnect()
+    }, 750)
+  }
+
+  private async sendConnect(): Promise<void> {
+    if (this.connectSent) return
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    if (!this.pendingConnectId) return
+
+    this.connectSent = true
+    if (this.connectSendTimer) {
+      clearTimeout(this.connectSendTimer)
+      this.connectSendTimer = null
+    }
+
+    try {
+      const connectFrame: RPCFrame = {
+        type: 'req',
+        id: this.pendingConnectId,
+        method: 'connect',
+        params: await buildConnectParams(this.config.auth || '', { nonce: this.connectNonce }),
+      }
+      this.ws.send(JSON.stringify(connectFrame))
+      this.startConnectTimeout()
+    } catch (e) {
+      const locale = getActiveLocale()
+      const reason = byLocale(
+        `Gateway connect 参数构造失败: ${(e as Error)?.message || 'unknown error'}`,
+        `Failed to build Gateway connect params: ${(e as Error)?.message || 'unknown error'}`,
+        locale,
+      )
+      this.pendingConnectId = null
+      this.setState(ConnectionState.FAILED)
+      this.emit('error', reason)
+      this.emit('failed', reason)
+      this.safeClose(4001, reason)
+    }
+  }
+
   private createConnection(): void {
     try {
       this.ws = new WebSocket(this.buildConnectionUrl())
@@ -129,16 +178,10 @@ export class OpenClawWebSocket {
       this.ws.onopen = () => {
         const connectId = `connect-${Date.now()}`
         this.pendingConnectId = connectId
-
-        // Gateway 要求第一条消息必须是 connect 握手
-        const connectFrame: RPCFrame = {
-          type: 'req',
-          id: connectId,
-          method: 'connect',
-          params: buildConnectParams(this.config.auth || ''),
-        }
-        this.ws!.send(JSON.stringify(connectFrame))
-        this.startConnectTimeout()
+        this.connectNonce = null
+        this.connectSent = false
+        // 远程连接需要先拿到 connect.challenge 的 nonce 再签名 connect；同时做一个兜底定时器，避免事件丢失导致卡死
+        this.queueConnectSend()
       }
 
       this.ws.onmessage = (event: MessageEvent) => {
@@ -185,6 +228,14 @@ export class OpenClawWebSocket {
       this.emit(`rpc:${frame.id}`, frame)
     } else if (frame.type === 'event') {
       const evt = frame as RPCEvent
+      if (evt.event === 'connect.challenge') {
+        const payload = evt.payload as { nonce?: unknown } | undefined
+        const nonce = payload && typeof payload.nonce === 'string' ? payload.nonce : null
+        if (nonce) {
+          this.connectNonce = nonce
+          void this.sendConnect()
+        }
+      }
       this.emit('event', evt)
       this.emit(`event:${evt.event}`, evt.payload)
     }
@@ -206,7 +257,22 @@ export class OpenClawWebSocket {
       return
     }
 
-    const reason = frame.error?.message ?? byLocale('Gateway connect 握手失败', 'Gateway connect handshake failed', getActiveLocale())
+    const locale = getActiveLocale()
+    const error = (frame.error ?? {}) as {
+      message?: unknown
+      code?: unknown
+      details?: unknown
+    }
+    const errorMessage = typeof error.message === 'string' ? error.message : ''
+    const details = (error.details ?? {}) as { requestId?: unknown }
+    const requestId = typeof details.requestId === 'string' ? details.requestId : ''
+    const reason = requestId
+      ? byLocale(
+          `设备配对待批准，请在 Gateway 上运行 openclaw devices approve ${requestId}`,
+          `Device pairing required. Approve on the Gateway: openclaw devices approve ${requestId}`,
+          locale,
+        )
+      : errorMessage || byLocale('Gateway connect 握手失败', 'Gateway connect handshake failed', locale)
     this.setState(ConnectionState.FAILED)
     this.emit('error', reason)
     this.emit('failed', reason)
@@ -392,6 +458,10 @@ export class OpenClawWebSocket {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
+    }
+    if (this.connectSendTimer) {
+      clearTimeout(this.connectSendTimer)
+      this.connectSendTimer = null
     }
     if (this.connectTimer) {
       clearTimeout(this.connectTimer)

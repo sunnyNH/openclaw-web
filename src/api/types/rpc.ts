@@ -21,9 +21,12 @@ export interface RPCEvent {
 }
 
 export interface RPCError {
-  code?: number
+  code?: string | number
   message: string
+  details?: unknown
   data?: unknown
+  retryable?: boolean
+  retryAfterMs?: number
 }
 
 export type RPCFrame = RPCRequest | RPCResponse | RPCEvent

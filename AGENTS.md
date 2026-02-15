@@ -11,7 +11,7 @@
 
 ## 构建、测试与开发命令
 - `npm install`：安装依赖。
-- `npm run dev`：启动 Vite 开发服务（`http://localhost:3000`）。
+- `npm run dev`：启动 Vite 开发服务（`http://localhost:3001`）。
 - `npm run build`：执行 `vue-tsc -b` 类型检查并产出 `dist/` 生产包。
 - `npm run preview`：本地预览生产构建结果。
 

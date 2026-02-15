@@ -33,6 +33,11 @@ OpenClaw Web 是一个基于 Vue 3 + Naive UI 的 OpenClaw Gateway 管理后台�
 - Naive UI
 - WebSocket RPC（对接 OpenClaw Gateway）
 
+## 版本兼容性
+
+- 本仓库 `main` 分支适配 OpenClaw `2026.02.14` 及以上版本。
+- 如果使用的是 OpenClaw `2026.02.13` 版本以及之前的版本，请使用 `openclaw-26.02.13` tag。
+
 ## 快速开始
 
 ### 1. 安装依赖
@@ -55,7 +60,7 @@ cp .env.example .env.development
 npm run dev
 ```
 
-默认地址：`http://localhost:3000`
+默认地址：`http://localhost:3001`
 
 ### 4. 生产构建
 

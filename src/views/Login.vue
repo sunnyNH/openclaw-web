@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { NCard, NInput, NButton, NSpace, NText, NAlert } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { buildConnectParams } from '@/api/connect'
+import { OpenClawWebSocket } from '@/api/websocket'
 
 const router = useRouter()
 const route = useRoute()
@@ -29,20 +29,6 @@ const gatewaySchemeHint = computed(() => {
   return t('common.httpsWsBlocked')
 })
 
-function buildGatewayUrl(url: string, tokenValue: string): string {
-  try {
-    const parsed = new URL(url, window.location.href)
-    if (tokenValue.trim()) {
-      parsed.searchParams.set('auth', tokenValue)
-    } else {
-      parsed.searchParams.delete('auth')
-    }
-    return parsed.toString()
-  } catch {
-    return url
-  }
-}
-
 async function handleLogin() {
   if (!token.value.trim()) {
     error.value = t('pages.login.inputTokenRequired')
@@ -58,70 +44,55 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    // Test connection
-    const ws = new WebSocket(buildGatewayUrl(gatewayUrl.value, token.value))
-    const connectId = `connect-${Date.now()}`
+    // 复用同一套握手逻辑（connect.challenge -> connect(device signature)）
+    const probe = new OpenClawWebSocket({
+      reconnect: false,
+      maxReconnectAttempts: 0,
+    })
 
     await new Promise<void>((resolve, reject) => {
       let settled = false
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
-        ws.close()
+        probe.disconnect()
         reject(new Error(t('pages.login.connectTimeout')))
       }, 8000)
 
-      ws.onopen = () => {
-        // Gateway 要求第一条消息必须是 connect 握手
-        const connectFrame = {
-          type: 'req',
-          id: connectId,
-          method: 'connect',
-          params: buildConnectParams(token.value),
-        }
-        ws.send(JSON.stringify(connectFrame))
+      const cleanup = () => {
+        clearTimeout(timer)
+        offConnected()
+        offFailed()
+        offDisconnected()
+        probe.disconnect()
       }
 
-      ws.onmessage = (event) => {
-        try {
-          const res = JSON.parse(event.data) as { type?: string; id?: string; ok?: boolean; error?: { message?: string } }
-          if (res.type !== 'res' || res.id !== connectId) {
-            return
-          }
-
-          clearTimeout(timer)
-          if (settled) return
-          settled = true
-
-          if (res.ok) {
-            ws.close()
-            resolve()
-          } else {
-            ws.close()
-            reject(new Error(res.error?.message || t('pages.login.tokenInvalid')))
-          }
-        } catch {
-          // 只忽略非 JSON 消息，继续等待 connect 响应
-        }
-      }
-
-      ws.onclose = (event) => {
+      const offConnected = probe.on('connected', () => {
         if (settled) return
         settled = true
-        clearTimeout(timer)
-        if (event.code !== 1000) {
-          reject(new Error(event.reason || t('pages.login.connectionClosedWithCode', { code: event.code })))
-        } else {
-          reject(new Error(t('pages.login.connectionClosed')))
-        }
-      }
+        cleanup()
+        resolve()
+      })
 
-      ws.onerror = () => {
+      const offFailed = probe.on('failed', (reason: unknown) => {
         if (settled) return
         settled = true
-        clearTimeout(timer)
-        reject(new Error(t('pages.login.connectFailed')))
-      }
+        cleanup()
+        reject(new Error(String(reason || t('pages.login.tokenInvalid'))))
+      })
+
+      const offDisconnected = probe.on('disconnected', (code: unknown, reason: unknown) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        const message =
+          typeof reason === 'string' && reason.trim()
+            ? reason
+            : t('pages.login.connectionClosedWithCode', { code: String(code) })
+        reject(new Error(message))
+      })
+
+      probe.connect(gatewayUrl.value, token.value)
     })
 
     authStore.setToken(token.value)
