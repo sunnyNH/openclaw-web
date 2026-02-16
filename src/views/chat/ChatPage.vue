@@ -810,11 +810,13 @@ const slashSuggestions = computed<SlashSuggestionItem[]>(() => {
         key: 'new-default',
       },
     ]
-    const models = slashNewModelOptions.value.map((model) => ({
-      kind: 'new-model',
-      key: `new-model-${model.modelRef}`,
-      model,
-    }))
+    const models: SlashSuggestionItem[] = slashNewModelOptions.value.map(
+      (model): SlashSuggestionItem => ({
+        kind: 'new-model',
+        key: `new-model-${model.modelRef}`,
+        model,
+      })
+    )
     return [...defaults, ...models]
   }
   if (slashSkillMode.value) {
