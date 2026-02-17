@@ -250,6 +250,105 @@ const trendAxisLabels = computed(() => {
   }
 })
 
+const trendSvgRef = ref<SVGSVGElement | null>(null)
+const trendHoverIndex = ref<number | null>(null)
+const trendTooltipStyle = ref<Record<string, string> | null>(null)
+
+const hoveredTrendPoint = computed(() => {
+  const index = trendHoverIndex.value
+  if (index === null) return null
+  return trendGeometry.value.points[index] || null
+})
+
+const hoveredTrendText = computed(() => {
+  const point = hoveredTrendPoint.value
+  if (!point) return ''
+  return t('pages.dashboard.trend.pointTitle', {
+    date: point.date,
+    value: formatUsageValue(point.value),
+    messages: point.messages,
+    errors: point.errors,
+  })
+})
+
+function clearTrendHover() {
+  trendHoverIndex.value = null
+  trendTooltipStyle.value = null
+}
+
+function handleTrendMouseMove(event: MouseEvent) {
+  const svg = trendSvgRef.value
+  const points = trendGeometry.value.points
+  if (!svg || points.length === 0) {
+    clearTrendHover()
+    return
+  }
+
+  const firstPoint = points[0]
+  if (!firstPoint) {
+    clearTrendHover()
+    return
+  }
+
+  const rect = svg.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) {
+    clearTrendHover()
+    return
+  }
+
+  const svgX = ((event.clientX - rect.left) / rect.width) * trendGeometry.value.width
+  const plotMinX = trendGeometry.value.left
+  const plotMaxX = trendGeometry.value.left + trendGeometry.value.usableWidth
+  if (svgX < plotMinX || svgX > plotMaxX) {
+    clearTrendHover()
+    return
+  }
+
+  let nearestIndex = 0
+  let nearestDistance = Math.abs(firstPoint.x - svgX)
+  for (let i = 1; i < points.length; i += 1) {
+    const candidate = points[i]
+    if (!candidate) continue
+
+    const distance = Math.abs(candidate.x - svgX)
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearestIndex = i
+    }
+  }
+
+  const point = points[nearestIndex]
+  if (!point) {
+    clearTrendHover()
+    return
+  }
+  trendHoverIndex.value = nearestIndex
+
+  const pointPxX = (point.x / trendGeometry.value.width) * rect.width
+  const pointPxY = (point.y / trendGeometry.value.height) * rect.height
+
+  // Keep in sync with `.trend-tooltip` width/height
+  const tooltipWidth = 260
+  const tooltipHeight = 32
+  const margin = 8
+  const offsetX = 12
+  const offsetY = 10
+
+  let left = pointPxX + offsetX
+  let top = pointPxY - offsetY - tooltipHeight
+
+  if (left + tooltipWidth > rect.width - margin) left = pointPxX - offsetX - tooltipWidth
+  left = Math.max(margin, Math.min(left, rect.width - tooltipWidth - margin))
+
+  if (top < margin) top = pointPxY + offsetY
+  top = Math.max(margin, Math.min(top, rect.height - tooltipHeight - margin))
+
+  trendTooltipStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+  }
+}
+
 const usageKpis = computed(() => {
   const totals = usageTotals.value
   const rows = dailyUsage.value
@@ -885,58 +984,65 @@ function viewModels() {
 
             <div class="trend-chart-panel">
               <template v-if="trendGeometry.points.length">
-                <svg
-                  class="trend-chart-svg"
-                  :viewBox="`0 0 ${trendGeometry.width} ${trendGeometry.height}`"
-                  preserveAspectRatio="none"
-                >
-                  <g v-for="guide in trendGeometry.guides" :key="`guide-${guide.ratio}`">
-                    <line
-                      :x1="trendGeometry.left"
-                      :y1="guide.y"
-                      :x2="trendGeometry.left + trendGeometry.usableWidth"
-                      :y2="guide.y"
-                      class="trend-grid-line"
-                    />
-                    <text
-                      x="4"
-                      :y="guide.y + 4"
-                      class="trend-grid-label"
-                    >
-                      {{ formatUsageValue(guide.value) }}
-                    </text>
-                  </g>
-
-                  <path
-                    v-if="trendGeometry.areaPath"
-                    class="trend-area"
-                    :d="trendGeometry.areaPath"
-                  />
-                  <polyline
-                    v-if="trendGeometry.polyline"
-                    class="trend-line"
-                    :points="trendGeometry.polyline"
-                  />
-                  <circle
-                    v-for="point in trendGeometry.points"
-                    :key="`point-${point.date}`"
-                    class="trend-point"
-                    :cx="point.x"
-                    :cy="point.y"
-                    r="3.5"
+                <div class="trend-chart-canvas">
+                  <svg
+                    ref="trendSvgRef"
+                    class="trend-chart-svg"
+                    :viewBox="`0 0 ${trendGeometry.width} ${trendGeometry.height}`"
+                    preserveAspectRatio="none"
+                    @mousemove="handleTrendMouseMove"
+                    @mouseleave="clearTrendHover"
                   >
-                      <title>
-                      {{
-                        t('pages.dashboard.trend.pointTitle', {
-                          date: point.date,
-                          value: formatUsageValue(point.value),
-                          messages: point.messages,
-                          errors: point.errors,
-                        })
-                      }}
-                    </title>
-                  </circle>
-                </svg>
+                    <g v-for="guide in trendGeometry.guides" :key="`guide-${guide.ratio}`">
+                      <line
+                        :x1="trendGeometry.left"
+                        :y1="guide.y"
+                        :x2="trendGeometry.left + trendGeometry.usableWidth"
+                        :y2="guide.y"
+                        class="trend-grid-line"
+                      />
+                      <text
+                        x="4"
+                        :y="guide.y + 4"
+                        class="trend-grid-label"
+                      >
+                        {{ formatUsageValue(guide.value) }}
+                      </text>
+                    </g>
+
+                    <path
+                      v-if="trendGeometry.areaPath"
+                      class="trend-area"
+                      :d="trendGeometry.areaPath"
+                    />
+                    <polyline
+                      v-if="trendGeometry.polyline"
+                      class="trend-line"
+                      :points="trendGeometry.polyline"
+                    />
+                    <line
+                      v-if="hoveredTrendPoint"
+                      class="trend-hover-line"
+                      :x1="hoveredTrendPoint.x"
+                      :y1="trendGeometry.top"
+                      :x2="hoveredTrendPoint.x"
+                      :y2="trendGeometry.top + trendGeometry.usableHeight"
+                    />
+                    <circle
+                      v-for="point in trendGeometry.points"
+                      :key="`point-${point.date}`"
+                      class="trend-point"
+                      :class="{ 'trend-point-active': hoveredTrendPoint?.date === point.date }"
+                      :cx="point.x"
+                      :cy="point.y"
+                      :r="hoveredTrendPoint?.date === point.date ? 6 : 3.5"
+                    />
+                  </svg>
+
+                  <div v-if="hoveredTrendPoint && trendTooltipStyle" class="trend-tooltip" :style="trendTooltipStyle">
+                    {{ hoveredTrendText }}
+                  </div>
+                </div>
 
                 <div class="trend-axis-note">
                   <span>{{ trendAxisLabels.start }}</span>
@@ -1265,9 +1371,14 @@ function viewModels() {
   background: linear-gradient(180deg, rgba(42, 127, 255, 0.06), transparent 38%);
 }
 
+.trend-chart-canvas {
+  position: relative;
+}
+
 .trend-chart-svg {
   width: 100%;
   height: 250px;
+  cursor: crosshair;
 }
 
 .trend-grid-line {
@@ -1293,10 +1404,39 @@ function viewModels() {
   stroke-linecap: round;
 }
 
+.trend-hover-line {
+  stroke: rgba(42, 127, 255, 0.6);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
 .trend-point {
   fill: #18a058;
   stroke: rgba(24, 160, 88, 0.3);
   stroke-width: 3;
+}
+
+.trend-point-active {
+  stroke: rgba(24, 160, 88, 0.45);
+  stroke-width: 6;
+}
+
+.trend-tooltip {
+  position: absolute;
+  width: 260px;
+  height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
 }
 
 .trend-axis-note {
