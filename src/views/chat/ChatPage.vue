@@ -1856,8 +1856,8 @@ async function handleSend() {
 </script>
 
 <template>
-  <NSpace vertical :size="16">
-    <NCard :title="t('pages.chat.title')" class="app-card">
+  <div class="chat-page">
+    <NCard :title="t('pages.chat.title')" class="app-card chat-root-card">
       <template #header-extra>
         <NSpace :size="8" class="app-toolbar">
           <div v-if="sessionTokenMetricTags.length" class="chat-token-metrics">
@@ -1884,8 +1884,8 @@ async function handleSend() {
         </NSpace>
       </template>
 
-      <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
-        <NGridItem :span="1">
+      <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12" class="chat-grid">
+        <NGridItem :span="1" class="chat-grid-side">
           <NCard embedded :bordered="false" class="chat-side-card">
             <NSpace vertical :size="12">
               <div class="chat-side-stats">
@@ -2008,7 +2008,7 @@ async function handleSend() {
           </NCard>
         </NGridItem>
 
-        <NGridItem :span="2">
+        <NGridItem :span="2" class="chat-grid-main">
           <div class="chat-main-column">
             <NCard embedded :bordered="false" class="chat-transcript-card">
               <NSpace justify="space-between" align="center" style="margin-bottom: 10px;">
@@ -2452,10 +2452,60 @@ async function handleSend() {
         </NSpace>
       </template>
     </NModal>
-  </NSpace>
+  </div>
 </template>
 
 <style scoped>
+.chat-page {
+  min-height: 0;
+}
+
+/* 桌面端：让聊天区尽量占满可用高度，提升 transcript 可视面积 */
+@media (min-width: 1024px) {
+  .chat-page {
+    height: calc(100vh - var(--header-height) - 48px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.chat-root-card) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.chat-root-card .n-card__content) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-grid {
+    flex: 1;
+    min-height: 0;
+    align-content: stretch;
+  }
+
+  .chat-grid-side,
+  .chat-grid-main {
+    min-height: 0;
+    display: flex;
+  }
+
+  .chat-side-card {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .chat-main-column {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
 .chat-token-metrics {
   display: flex;
   flex-wrap: wrap;
@@ -2609,8 +2659,7 @@ async function handleSend() {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: calc(100vh - 224px);
-  min-height: 520px;
+  min-height: 0;
   overflow: hidden;
 }
 
