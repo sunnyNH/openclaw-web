@@ -951,6 +951,7 @@ function looksLikeMarkdown(value: string): boolean {
   if (/^\s{0,3}>\s+\S+/m.test(text)) return true
   if (/^\s{0,3}[-*+]\s+\S+/m.test(text)) return true
   if (/^\s{0,3}\d{1,9}[.)]\s+\S+/m.test(text)) return true
+  if (/\|\s*[-:]{3,}\s*\|/.test(text)) return true
   if (/^\s*\|?.+\|.+\n\s*\|?\s*[-:]{3,}\s*\|/m.test(text)) return true
   if (/^\s{0,3}(?:[-*_]\s*){3,}$/m.test(text)) return true
   if (/^\s{0,3}[-*_]{3,}\s*$/m.test(text)) return true

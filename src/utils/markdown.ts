@@ -41,6 +41,106 @@ function isFenceDelimiter(line: string): boolean {
   return /^[ \t]{0,3}(```+|~~~+)/.test(line)
 }
 
+function splitTableCells(line: string): string[] {
+  const trimmedStart = line.trimStart()
+  const trimmedEnd = line.trimEnd()
+  const raw = line.split('|')
+  let start = 0
+  let end = raw.length
+
+  if (trimmedStart.startsWith('|')) start += 1
+  if (trimmedEnd.endsWith('|')) end -= 1
+
+  return raw.slice(start, end).map((cell) => cell.trim())
+}
+
+function parseTableSeparatorLine(line: string): { colCount: number } | null {
+  const cells = splitTableCells(line)
+  if (cells.length < 2) return null
+  for (const cell of cells) {
+    if (!/^:?-{3,}:?$/.test(cell)) return null
+  }
+  return { colCount: cells.length }
+}
+
+function normalizeGfmTableBlocks(lines: string[]): string[] {
+  let hasSeparator = false
+  let inFence = false
+  for (const line of lines) {
+    if (isFenceDelimiter(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+    if (/\|\s*:?-{3,}:?\s*\|/.test(line)) {
+      hasSeparator = true
+      break
+    }
+  }
+  if (!hasSeparator) return lines
+
+  // 常见坏格式：把多行表格“压扁”成一行（`| a | b | |---|---| | 1 | 2 |`）
+  // 再加上前面带标题文本，会导致 markdown-it 识别不到 table。
+  const expanded: string[] = []
+  inFence = false
+
+  for (const line of lines) {
+    if (isFenceDelimiter(line)) {
+      inFence = !inFence
+      expanded.push(line)
+      continue
+    }
+    if (inFence) {
+      expanded.push(line)
+      continue
+    }
+
+    // 仅在出现表格分隔符时尝试修复，避免误伤普通文本中的 `|`。
+    if (/\|\s*:?-{3,}:?\s*\|/.test(line) && /\|\s+\|/.test(line)) {
+      expanded.push(...line.replace(/\|\s+\|/g, '|\n|').split('\n'))
+      continue
+    }
+
+    expanded.push(line)
+  }
+
+  const repaired: string[] = []
+  inFence = false
+  for (const line of expanded) {
+    if (isFenceDelimiter(line)) {
+      inFence = !inFence
+      repaired.push(line)
+      continue
+    }
+    if (inFence) {
+      repaired.push(line)
+      continue
+    }
+
+    const separator = parseTableSeparatorLine(line)
+    if (separator && repaired.length > 0) {
+      const headerLine = repaired[repaired.length - 1] || ''
+      const headerCells = splitTableCells(headerLine)
+
+      // 典型场景：
+      // "5) 已有 Skills ... | Skill | 什么时候用 | 核心要点/约束 |"
+      // "|---|---|---|"
+      // 头部多出 1 列，导致 table 不被识别。这里把第一列提出来当标题行。
+      if (headerCells.length === separator.colCount + 1) {
+        const title = headerCells[0]?.trim() || ''
+        const cells = headerCells.slice(1)
+        repaired.pop()
+        if (title) repaired.push(title)
+        repaired.push(`| ${cells.join(' | ')} |`)
+      }
+    }
+
+    repaired.push(line)
+  }
+
+  return repaired
+}
+
 function parseTopLevelListItem(line: string): { kind: 'ul' | 'ol'; content: string } | null {
   const unordered = line.match(/^[ \t]{0,3}[-*+]\s+(.+)$/)
   if (unordered) {
@@ -125,10 +225,13 @@ function normalizeMarkdownInput(markdown: string, options: { autoNestList: boole
     normalizedLines.push(normalizeLeadingIndent(line))
   }
 
-  if (!options.autoNestList) return normalizedLines.join('\n')
+  let lines = normalizedLines
+  if (options.autoNestList) {
+    const nested = autoNestListLines(normalizedLines)
+    lines = nested.changed ? nested.lines : normalizedLines
+  }
 
-  const nested = autoNestListLines(normalizedLines)
-  return (nested.changed ? nested.lines : normalizedLines).join('\n')
+  return normalizeGfmTableBlocks(lines).join('\n')
 }
 
 export function renderSimpleMarkdown(markdown: string, options: SimpleMarkdownRenderOptions = {}): string {
