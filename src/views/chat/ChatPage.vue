@@ -929,6 +929,7 @@ function looksLikeMarkdown(value: string): boolean {
   if (/^\s{0,3}>\s+\S+/m.test(text)) return true
   if (/^\s{0,3}[-*+]\s+\S+/m.test(text)) return true
   if (/^\s{0,3}\d{1,9}[.)]\s+\S+/m.test(text)) return true
+  if (/^\s*\|?.+\|.+\n\s*\|?\s*[-:]{3,}\s*\|/m.test(text)) return true
   if (/^\s{0,3}(?:[-*_]\s*){3,}$/m.test(text)) return true
   if (/^\s{0,3}[-*_]{3,}\s*$/m.test(text)) return true
   return false
@@ -2911,6 +2912,41 @@ async function handleSend() {
   line-height: 1.72;
 }
 
+/* —— 表格（GFM） —— */
+.chat-markdown :deep(table) {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.chat-markdown :deep(th),
+.chat-markdown :deep(td) {
+  padding: 10px 12px;
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+  text-align: left;
+}
+
+.chat-markdown :deep(th) {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.chat-markdown :deep(th:last-child),
+.chat-markdown :deep(td:last-child) {
+  border-right: none;
+}
+
+.chat-markdown :deep(tr:last-child > td) {
+  border-bottom: none;
+}
+
 /* —— 无序列表 —— */
 .chat-markdown :deep(ul) {
   margin: 4px 0;
@@ -3024,7 +3060,9 @@ async function handleSend() {
 }
 
 .chat-markdown :deep(p code),
-.chat-markdown :deep(li code) {
+.chat-markdown :deep(li code),
+.chat-markdown :deep(td code),
+.chat-markdown :deep(th code) {
   padding: 0.5px 4.5px;
   border-radius: 3px;
   border: 1px solid var(--md-code-border);

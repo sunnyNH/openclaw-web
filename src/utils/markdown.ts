@@ -11,6 +11,9 @@ const markdownRenderer = new MarkdownIt('commonmark', {
   typographer: false,
 })
 
+// commonmark 预设默认不启用 GFM 表格；聊天里经常需要展示“|---|”表格
+markdownRenderer.enable('table')
+
 const defaultLinkOpenRule = markdownRenderer.renderer.rules.link_open
 markdownRenderer.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   const token = tokens[idx]
