@@ -243,11 +243,35 @@ const sessionChannelDisplay = computed(() => {
 })
 
 const messageList = computed(() => chatStore.messages)
-const visibleMessageList = computed(() => messageList.value.filter((item) => item.role !== 'tool'))
-const filteredMessages = computed(() => {
-  const role = roleFilter.value
-  if (role === 'all') return visibleMessageList.value
-  return visibleMessageList.value.filter((item) => item.role === role)
+function isThinkingOnlyStructuredMessage(structured: StructuredMessageView | null): boolean {
+  if (!structured) return false
+  if (structured.thinkings.length === 0) return false
+  return (
+    structured.toolCalls.length === 0 &&
+    structured.toolResults.length === 0 &&
+    structured.validationErrors.length === 0 &&
+    structured.plainTexts.length === 0
+  )
+}
+
+const visibleMessageEntries = computed<RenderMessage[]>(() => {
+  const list = messageList.value.filter((item) => item.role !== 'tool')
+  const rendered: RenderMessage[] = []
+
+  for (let idx = 0; idx < list.length; idx += 1) {
+    const item = list[idx]
+    if (!item) continue
+    const structured = parseStructuredMessage(item.content)
+    // thinking/thinkingSignature 仅用于模型侧元信息，不在 Chat UI 展示
+    if (isThinkingOnlyStructuredMessage(structured)) continue
+    rendered.push({
+      key: item.id || `${item.role}-${idx}`,
+      item,
+      structured,
+    })
+  }
+
+  return rendered
 })
 
 interface ToolCallItemView {
@@ -388,17 +412,19 @@ const agentBusyToolName = computed(() => {
   if (phase === 'replying' || phase === 'aborting') return ''
 
   const runId = chatStore.agentStatus.runId
-  const list = visibleMessageList.value
+  const list = visibleMessageEntries.value
   let startIndex = 0
   if (runId) {
-    const idx = list.findIndex((item) => item.id === runId)
+    const idx = list.findIndex((entry) => entry.item.id === runId)
     if (idx >= 0) startIndex = idx + 1
   }
 
   for (let i = list.length - 1; i >= startIndex; i -= 1) {
-    const item = list[i]
-    if (item?.role !== 'assistant') continue
-    const structured = parseStructuredMessage(item.content)
+    const entry = list[i]
+    if (!entry) continue
+    const item = entry.item
+    if (item.role !== 'assistant') continue
+    const structured = entry.structured
     if (!structured) return ''
 
     if (structured.toolCalls.length === 0) return ''
@@ -498,18 +524,19 @@ async function handleAbort() {
 }
 
 const stats = computed(() => {
-  const list = visibleMessageList.value
+  const list = visibleMessageEntries.value
   let user = 0
   let assistant = 0
   let system = 0
 
-  for (const item of list) {
+  for (const entry of list) {
+    const item = entry.item
     if (item.role === 'user') user += 1
     else if (item.role === 'assistant') assistant += 1
     else if (item.role === 'system') system += 1
   }
 
-  const last = list.length > 0 ? list[list.length - 1] : null
+  const last = list.length > 0 ? list[list.length - 1]?.item : null
   return {
     total: list.length,
     user,
@@ -519,16 +546,11 @@ const stats = computed(() => {
   }
 })
 
-const renderedMessages = computed<RenderMessage[]>(() =>
-  filteredMessages.value.map((item, idx) => {
-    const structured = parseStructuredMessage(item.content)
-    return {
-      key: item.id || `${item.role}-${idx}`,
-      item,
-      structured,
-    }
-  })
-)
+const renderedMessages = computed<RenderMessage[]>(() => {
+  const role = roleFilter.value
+  if (role === 'all') return visibleMessageEntries.value
+  return visibleMessageEntries.value.filter((entry) => entry.item.role === role)
+})
 
 const filteredQuickReplies = computed(() => {
   const query = quickReplySearch.value.trim().toLowerCase()
@@ -1173,6 +1195,60 @@ function parseSingleJsonValue(text: string): unknown | null {
   return null
 }
 
+function splitLeadingJsonValue(line: string): { parsed: unknown; rest: string } | null {
+  const text = line.trimStart()
+  if (!text || (text[0] !== '{' && text[0] !== '[')) return null
+
+  let inString = false
+  let escaped = false
+  let depth = 0
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (ch === '\\\\') {
+        escaped = true
+        continue
+      }
+      if (ch === '\"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (ch === '\"') {
+      inString = true
+      continue
+    }
+
+    if (ch === '{' || ch === '[') {
+      depth += 1
+      continue
+    }
+
+    if (ch === '}' || ch === ']') {
+      depth -= 1
+      if (depth !== 0) continue
+
+      const jsonText = text.slice(0, i + 1)
+      const parsed = parseSingleJsonValue(jsonText)
+      if (parsed == null) return null
+
+      const rest = text.slice(i + 1).trim()
+      return {
+        parsed,
+        rest,
+      }
+    }
+  }
+
+  return null
+}
+
 function parseJsonItems(content: string): { items: unknown[]; plainLines: string[] } | null {
   const normalized = stripCodeFence(content).trim()
   if (!normalized) return null
@@ -1202,6 +1278,23 @@ function parseJsonItems(content: string): { items: unknown[]; plainLines: string
   for (const line of lines) {
     const parsedLine = parseSingleJsonValue(line)
     if (parsedLine == null) {
+      const split = splitLeadingJsonValue(line)
+      if (split) {
+        const parsedValue = split.parsed
+        if (Array.isArray(parsedValue)) {
+          for (const item of parsedValue) {
+            rawItems.push(unwrapJsonValue(item))
+          }
+        } else {
+          rawItems.push(parsedValue)
+        }
+
+        if (split.rest) {
+          plainLines.push(split.rest)
+        }
+        continue
+      }
+
       plainLines.push(line)
       continue
     }
@@ -1226,41 +1319,27 @@ function parseThinkingSignature(value: unknown): {
   summaryText?: string
   hasEncryptedSignature: boolean
 } {
-  const raw = asString(value).trim()
-  if (!raw) {
+  const row = asRecord(unwrapJsonValue(value))
+  if (!row) {
     return {
       hasEncryptedSignature: false,
     }
   }
-
-  try {
-    const parsed = unwrapJsonValue(JSON.parse(raw))
-    const row = asRecord(parsed)
-    if (!row) {
-      return {
-        hasEncryptedSignature: false,
-      }
+  const signatureId = asString(row.id) || undefined
+  const summaryArray = Array.isArray(row.summary) ? row.summary : []
+  let summaryText = ''
+  for (const item of summaryArray) {
+    const text = asText(item).trim()
+    if (text) {
+      summaryText = text
+      break
     }
-    const signatureId = asString(row.id) || undefined
-    const summaryArray = Array.isArray(row.summary) ? row.summary : []
-    let summaryText = ''
-    for (const item of summaryArray) {
-      const text = asText(item).trim()
-      if (text) {
-        summaryText = text
-        break
-      }
-    }
-    const encrypted = asString(row.encrypted_content)
-    return {
-      signatureId,
-      summaryText: summaryText || undefined,
-      hasEncryptedSignature: !!encrypted,
-    }
-  } catch {
-    return {
-      hasEncryptedSignature: false,
-    }
+  }
+  const encrypted = asString(row.encrypted_content)
+  return {
+    signatureId,
+    summaryText: summaryText || undefined,
+    hasEncryptedSignature: !!encrypted,
   }
 }
 
@@ -1361,9 +1440,15 @@ function parseStructuredMessage(content: string): StructuredMessageView | null {
     }
 
     if (type === 'thinking' || type === 'reasoning') {
-      const text = asText(row.thinking ?? row.text ?? row.message).trim()
-      if (!text) continue
       const signature = parseThinkingSignature(row.thinkingSignature ?? row.signature)
+      const text = asText(row.thinking ?? row.text ?? row.message).trim()
+      const hasSignature = signature.signatureId || signature.summaryText || signature.hasEncryptedSignature
+      if (!text && !hasSignature) continue
+      // 仅有签名而没有思考文本时，通常是内部元信息；若同条消息还有正文，就不额外占用版面
+      if (!text && hasSignature && parsed.plainLines.length > 0) {
+        recognized += 1
+        continue
+      }
       thinkings.push({
         type: type || undefined,
         text,
@@ -1742,8 +1827,8 @@ watch(slashCommandKeyword, () => {
 })
 
 const messageSignature = computed(() => {
-  const list = visibleMessageList.value
-  const last = list.length > 0 ? list[list.length - 1] : null
+  const list = visibleMessageEntries.value
+  const last = list.length > 0 ? list[list.length - 1]?.item : null
   const lastContentLength = last?.content ? last.content.length : 0
   return `${list.length}|${last?.id || ''}|${last?.role || ''}|${last?.timestamp || ''}|${lastContentLength}`
 })
@@ -2050,45 +2135,6 @@ async function handleSend() {
                         </NSpace>
 
                         <div v-if="entry.structured" class="structured-message-list">
-                          <div v-if="entry.structured.thinkings.length" class="thinking-list">
-                            <div
-                              v-for="(thinking, thinkingIndex) in entry.structured.thinkings"
-                              :key="`${entry.key}-thinking-${thinkingIndex}`"
-                              class="thinking-card"
-                            >
-                              <NSpace align="center" justify="space-between">
-                                  <NSpace align="center" :size="6">
-                                  <NTag size="small" type="info" :bordered="false" round>{{ t('pages.chat.structured.thinking') }}</NTag>
-                                  <NText depth="3" style="font-size: 12px;">{{ thinking.type || 'thinking' }}</NText>
-                                </NSpace>
-                                <NTag
-                                  v-if="thinking.hasEncryptedSignature"
-                                  size="small"
-                                  type="warning"
-                                  :bordered="false"
-                                  round
-                                >
-                                  {{ t('pages.chat.structured.signed') }}
-                                </NTag>
-                              </NSpace>
-
-                              <div class="chat-bubble-content thinking-content">{{ thinking.text }}</div>
-
-                              <details
-                                v-if="thinking.signatureId || thinking.summaryText || thinking.hasEncryptedSignature"
-                                class="thinking-details"
-                              >
-                                <summary>{{ t('pages.chat.structured.signature.details') }}</summary>
-                                <div class="tool-call-grid">
-                                  <span class="tool-call-label">{{ t('pages.chat.structured.signature.id') }}</span>
-                                  <code>{{ thinking.signatureId || '-' }}</code>
-                                  <span class="tool-call-label">{{ t('pages.chat.structured.signature.summary') }}</span>
-                                  <div class="thinking-summary">{{ thinking.summaryText || '-' }}</div>
-                                </div>
-                              </details>
-                            </div>
-                          </div>
-
                           <div v-if="entry.structured.toolCalls.length" class="tool-call-list">
                             <div
                               v-for="(tool, toolIndex) in entry.structured.toolCalls"
@@ -2105,13 +2151,9 @@ async function handleSend() {
                                 </NText>
                               </NSpace>
 
-                              <div class="tool-call-grid">
-                                <span class="tool-call-label">{{ t('pages.chat.structured.command') }}</span>
-                                <code>{{ tool.command || '-' }}</code>
-                                <span class="tool-call-label">{{ t('pages.chat.structured.workdir') }}</span>
-                                <code>{{ tool.workdir || '-' }}</code>
-                                <span class="tool-call-label">{{ t('pages.chat.structured.callId') }}</span>
-                                <code>{{ tool.id || '-' }}</code>
+                              <div v-if="tool.command || tool.workdir" class="tool-call-meta">
+                                <code v-if="tool.command" class="tool-call-meta__code">{{ tool.command }}</code>
+                                <code v-if="tool.workdir" class="tool-call-meta__code">{{ tool.workdir }}</code>
                               </div>
 
                               <details v-if="tool.partialJson" class="tool-call-details">
@@ -2197,7 +2239,7 @@ async function handleSend() {
 
                     <NEmpty
                       v-else
-                      :description="visibleMessageList.length ? t('pages.chat.messages.emptyFiltered') : t('common.noMessages')"
+                      :description="visibleMessageEntries.length ? t('pages.chat.messages.emptyFiltered') : t('common.noMessages')"
                       style="padding: 72px 0;"
                     />
                   </div>
@@ -2924,7 +2966,7 @@ async function handleSend() {
 
 .chat-markdown {
   white-space: normal;
-  font-size: 13.5px;
+  font-size: 12.5px;
   line-height: 1.72;
   word-break: break-word;
   overflow-wrap: break-word;
@@ -3148,39 +3190,10 @@ async function handleSend() {
   background: var(--bg-primary);
 }
 
-.thinking-list,
 .tool-call-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.thinking-card {
-  border: 1px solid rgba(24, 144, 255, 0.34);
-  border-radius: 8px;
-  background: rgba(24, 144, 255, 0.08);
-  padding: 10px;
-}
-
-.thinking-content {
-  margin-top: 8px;
-}
-
-.thinking-details {
-  margin-top: 8px;
-}
-
-.thinking-details summary {
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  user-select: none;
-}
-
-.thinking-summary {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.55;
 }
 
 .tool-call-card {
@@ -3188,6 +3201,22 @@ async function handleSend() {
   border-radius: 8px;
   background: rgba(250, 173, 20, 0.08);
   padding: 10px;
+}
+
+.tool-call-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-call-meta__code {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 .tool-result-list {
