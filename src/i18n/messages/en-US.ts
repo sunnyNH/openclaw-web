@@ -1023,7 +1023,19 @@ export default {
           status: {
             description: 'View session and system status',
           },
-          noMatch: 'No matching command. Supported: /new, /skill, /model, /status.',
+          subagents: {
+            description: 'Inspect/control sub-agent runs (list/kill/log/info/send/steer/spawn)',
+            subcommands: {
+              list: 'List sub-agent runs for the current session',
+              kill: 'Kill a sub-agent run',
+              log: 'View sub-agent logs',
+              info: 'View sub-agent run details',
+              send: 'Send a message to a sub-agent',
+              steer: 'Steer a sub-agent run (append instructions)',
+              spawn: 'Spawn a sub-agent deterministically (auto suggests agentId)',
+            },
+          },
+          noMatch: 'No matching command. Supported: /new, /skill, /model, /status, /subagents.',
         },
         requiresFlag: 'Requires {flag}',
         fromConfig: 'From config',
@@ -1034,6 +1046,11 @@ export default {
         models: {
           loading: 'Loading models...',
           noMatch: 'No models available',
+        },
+        subagents: {
+          loading: 'Loading agents...',
+          noMatch: 'No matching agentId, or no agents.list configured.',
+          agentTag: 'Agent',
         },
       },
       agentStatus: {

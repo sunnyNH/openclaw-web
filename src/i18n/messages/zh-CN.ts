@@ -1023,7 +1023,19 @@ export default {
           status: {
             description: '查看当前会话与系统状态',
           },
-          noMatch: '没有匹配命令，仅支持 /new、/skill、/model、/status。',
+          subagents: {
+            description: '查看/控制子代理运行（支持 list/kill/log/info/send/steer/spawn）',
+            subcommands: {
+              list: '列出当前会话的子代理运行',
+              kill: '终止指定子代理运行',
+              log: '查看指定子代理日志',
+              info: '查看指定子代理详情',
+              send: '向子代理发送消息',
+              steer: '引导子代理（追加指令）',
+              spawn: '确定性启动子代理并分配任务（自动提示 agentId）',
+            },
+          },
+          noMatch: '没有匹配命令，仅支持 /new、/skill、/model、/status、/subagents。',
         },
         requiresFlag: '需 {flag}',
         fromConfig: '来自配置',
@@ -1034,6 +1046,11 @@ export default {
         models: {
           loading: '正在读取配置模型...',
           noMatch: '没有匹配模型，或当前未配置模型。',
+        },
+        subagents: {
+          loading: '正在读取 agent 配置...',
+          noMatch: '没有匹配的 agentId，或当前未配置 agents.list。',
+          agentTag: 'Agent',
         },
       },
       agentStatus: {

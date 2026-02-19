@@ -32,7 +32,7 @@ import { useSkillStore } from '@/stores/skill'
 import { useWebSocketStore } from '@/stores/websocket'
 import { formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
-import type { ChatMessage, SessionsUsageSession, Skill } from '@/api/types'
+import type { AgentInstance, ChatMessage, SessionsUsageSession, Skill } from '@/api/types'
 
 const message = useMessage()
 const route = useRoute()
@@ -328,6 +328,14 @@ interface SlashCommandPreset {
   requiresFlag?: string
 }
 
+type SubagentsSubcommand = 'list' | 'kill' | 'log' | 'info' | 'send' | 'steer' | 'spawn'
+
+interface SubagentsSubcommandPreset {
+  subcommand: SubagentsSubcommand
+  usage?: string
+  description: string
+}
+
 interface ConfiguredModelOption {
   modelRef: string
   providerId: string
@@ -335,9 +343,11 @@ interface ConfiguredModelOption {
 }
 
 interface SlashSuggestionItem {
-  kind: 'command' | 'skill' | 'model' | 'new-model' | 'new-default'
+  kind: 'command' | 'skill' | 'model' | 'new-model' | 'new-default' | 'subagents-subcommand' | 'subagents-agent'
   key: string
   preset?: SlashCommandPreset
+  subagentsSubcommand?: SubagentsSubcommandPreset
+  agent?: AgentInstance
   skill?: Skill
   model?: ConfiguredModelOption
 }
@@ -370,6 +380,50 @@ const slashCommandPresets = computed<SlashCommandPreset[]>(() => [
     command: '/status',
     description: t('pages.chat.slash.commands.status.description'),
     category: t('pages.chat.slash.categories.common'),
+  },
+  {
+    command: '/subagents',
+    usage: 'list|kill|log|info|send|steer|spawn',
+    description: t('pages.chat.slash.commands.subagents.description'),
+    category: t('pages.chat.slash.categories.session'),
+    expectArgs: true,
+  },
+])
+
+const subagentsSubcommandPresets = computed<SubagentsSubcommandPreset[]>(() => [
+  {
+    subcommand: 'list',
+    description: t('pages.chat.slash.commands.subagents.subcommands.list'),
+  },
+  {
+    subcommand: 'kill',
+    usage: '<runId>',
+    description: t('pages.chat.slash.commands.subagents.subcommands.kill'),
+  },
+  {
+    subcommand: 'log',
+    usage: '<runId>',
+    description: t('pages.chat.slash.commands.subagents.subcommands.log'),
+  },
+  {
+    subcommand: 'info',
+    usage: '<runId>',
+    description: t('pages.chat.slash.commands.subagents.subcommands.info'),
+  },
+  {
+    subcommand: 'send',
+    usage: '<runId> <message>',
+    description: t('pages.chat.slash.commands.subagents.subcommands.send'),
+  },
+  {
+    subcommand: 'steer',
+    usage: '<runId> <message>',
+    description: t('pages.chat.slash.commands.subagents.subcommands.steer'),
+  },
+  {
+    subcommand: 'spawn',
+    usage: '<agentId> <task> [--model <model>] [--thinking <level>]',
+    description: t('pages.chat.slash.commands.subagents.subcommands.spawn'),
   },
 ])
 const transcriptLoading = computed(() => chatStore.loading && messageList.value.length === 0)
@@ -597,6 +651,7 @@ const slashSkillMode = computed(() => slashMode.value && slashCommandKeyword.val
 const slashModelMode = computed(() =>
   slashMode.value && (slashCommandKeyword.value === 'model' || slashCommandKeyword.value === 'models')
 )
+const slashSubagentsMode = computed(() => slashMode.value && slashCommandKeyword.value === 'subagents')
 
 function skillSourceLabel(source: Skill['source']): string {
   if (source === 'workspace') return t('pages.skills.sources.workspace')
@@ -823,8 +878,86 @@ const slashNewModelOptions = computed<ConfiguredModelOption[]>(() => {
   return filterConfiguredModels(slashNewModelQuery.value, configuredModelOptions.value)
 })
 
+const availableAgents = computed<AgentInstance[]>(() => {
+  const list = configStore.config?.agents?.list || []
+  const map = new Map<string, AgentInstance>()
+  for (const agent of list) {
+    const id = agent.id?.trim()
+    if (!id) continue
+    if (map.has(id)) continue
+    map.set(id, { ...agent, id })
+  }
+  if (!map.has('main')) {
+    map.set('main', { id: 'main' })
+  }
+
+  return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id))
+})
+
+function normalizeSubagentsSubcommand(value: string): SubagentsSubcommand | '' {
+  const lowered = value.trim().toLowerCase()
+  if (lowered === 'list') return 'list'
+  if (lowered === 'kill') return 'kill'
+  if (lowered === 'log') return 'log'
+  if (lowered === 'info') return 'info'
+  if (lowered === 'send') return 'send'
+  if (lowered === 'steer') return 'steer'
+  if (lowered === 'spawn') return 'spawn'
+  return ''
+}
+
+const slashSubagentsArgs = computed(() => {
+  if (!slashSubagentsMode.value) return ''
+  return normalizeSlashArguments(slashFirstLine.value)
+})
+
+const slashSubagentsSubcommandQuery = computed(() => {
+  const { first } = splitFirstToken(slashSubagentsArgs.value)
+  return first.toLowerCase()
+})
+
+const slashSubagentsSubcommand = computed(() => normalizeSubagentsSubcommand(slashSubagentsSubcommandQuery.value))
+
+const slashSubagentsSubcommandOptions = computed<SubagentsSubcommandPreset[]>(() => {
+  if (!slashSubagentsMode.value) return []
+  const query = slashSubagentsSubcommandQuery.value
+  const presets = subagentsSubcommandPresets.value
+  if (!query) return presets
+  return presets.filter((preset) => preset.subcommand.includes(query))
+})
+
+const slashSubagentsSpawnAgentQuery = computed(() => {
+  if (!slashSubagentsMode.value) return ''
+  if (slashSubagentsSubcommand.value !== 'spawn') return ''
+  const { rest } = splitFirstToken(slashSubagentsArgs.value)
+  const { first } = splitFirstToken(rest)
+  return first.toLowerCase()
+})
+
+const slashSubagentsSpawnAgentOptions = computed<AgentInstance[]>(() => {
+  if (!slashSubagentsMode.value) return []
+  if (slashSubagentsSubcommand.value !== 'spawn') return []
+  const query = slashSubagentsSpawnAgentQuery.value
+  if (!query) return availableAgents.value
+  return availableAgents.value.filter((agent) => agent.id.toLowerCase().includes(query))
+})
+
 const slashSuggestions = computed<SlashSuggestionItem[]>(() => {
   if (!slashMode.value) return []
+  if (slashSubagentsMode.value) {
+    if (slashSubagentsSubcommand.value === 'spawn') {
+      return slashSubagentsSpawnAgentOptions.value.map((agent) => ({
+        kind: 'subagents-agent',
+        key: `subagents-spawn-agent-${agent.id}`,
+        agent,
+      }))
+    }
+    return slashSubagentsSubcommandOptions.value.map((preset) => ({
+      kind: 'subagents-subcommand',
+      key: `subagents-subcommand-${preset.subcommand}`,
+      subagentsSubcommand: preset,
+    }))
+  }
   if (slashNewMode.value) {
     const defaults: SlashSuggestionItem[] = [
       {
@@ -1669,7 +1802,52 @@ function applySlashNewDefault() {
   draft.value = lines.join('\n')
 }
 
+function applySlashSubagentsSubcommand(preset: SubagentsSubcommandPreset) {
+  const lines = draft.value.split('\n')
+  const args = slashSubagentsArgs.value
+  const { rest } = splitFirstToken(args)
+
+  const base = `/subagents ${preset.subcommand}`
+  if (rest) {
+    lines[0] = `${base} ${rest}`
+    draft.value = lines.join('\n')
+    return
+  }
+
+  if (preset.subcommand === 'list') {
+    lines[0] = base
+  } else {
+    lines[0] = `${base} `
+  }
+  draft.value = lines.join('\n')
+}
+
+function applySlashSubagentsSpawnAgent(agentId: string) {
+  const id = agentId.trim()
+  if (!id) return
+
+  const lines = draft.value.split('\n')
+  const args = slashSubagentsArgs.value
+  const { first: subcommand, rest } = splitFirstToken(args)
+  const normalizedSubcommand = normalizeSubagentsSubcommand(subcommand)
+  if (normalizedSubcommand !== 'spawn') return
+
+  const { rest: restAfterAgent } = splitFirstToken(rest)
+  lines[0] = restAfterAgent
+    ? `/subagents spawn ${id} ${restAfterAgent}`
+    : `/subagents spawn ${id} `
+  draft.value = lines.join('\n')
+}
+
 function applySlashSuggestion(item: SlashSuggestionItem) {
+  if (item.kind === 'subagents-subcommand' && item.subagentsSubcommand) {
+    applySlashSubagentsSubcommand(item.subagentsSubcommand)
+    return
+  }
+  if (item.kind === 'subagents-agent' && item.agent) {
+    applySlashSubagentsSpawnAgent(item.agent.id)
+    return
+  }
   if (item.kind === 'skill' && item.skill) {
     applySlashSkill(item.skill)
     return
@@ -1767,6 +1945,33 @@ async function handleDraftKeydown(event: KeyboardEvent) {
           return
         }
         applySlashNewDefault()
+        return
+      }
+
+      if (item.kind === 'subagents-subcommand' && item.subagentsSubcommand) {
+        const args = normalizeSlashArguments(slashFirstLine.value)
+        const { first } = splitFirstToken(args)
+        if (first && first.toLowerCase() === item.subagentsSubcommand.subcommand) {
+          await handleSend()
+          return
+        }
+        applySlashSubagentsSubcommand(item.subagentsSubcommand)
+        return
+      }
+
+      if (item.kind === 'subagents-agent' && item.agent) {
+        const args = normalizeSlashArguments(slashFirstLine.value)
+        const { first: sub, rest } = splitFirstToken(args)
+        if (normalizeSubagentsSubcommand(sub) !== 'spawn') {
+          applySlashSubagentsSpawnAgent(item.agent.id)
+          return
+        }
+        const { first: agentId } = splitFirstToken(rest)
+        if (agentId && agentId.toLowerCase() === item.agent.id.toLowerCase()) {
+          await handleSend()
+          return
+        }
+        applySlashSubagentsSpawnAgent(item.agent.id)
         return
       }
 
@@ -2323,6 +2528,30 @@ async function handleSend() {
                           <span class="chat-slash-flag">{{ t('pages.chat.slash.fromConfig') }}</span>
                         </div>
                       </div>
+                      <div v-else-if="item.kind === 'subagents-subcommand' && item.subagentsSubcommand">
+                        <div class="chat-slash-line">
+                          <span class="chat-slash-command">/subagents {{ item.subagentsSubcommand.subcommand }}</span>
+                          <span v-if="item.subagentsSubcommand.usage" class="chat-slash-usage">{{ item.subagentsSubcommand.usage }}</span>
+                          <NTag size="tiny" type="info" :bordered="false" round>
+                            subagents
+                          </NTag>
+                        </div>
+                        <div class="chat-slash-line chat-slash-desc">
+                          <span>{{ item.subagentsSubcommand.description }}</span>
+                        </div>
+                      </div>
+                      <div v-else-if="item.kind === 'subagents-agent' && item.agent">
+                        <div class="chat-slash-line">
+                          <span class="chat-slash-command">{{ item.agent.id }}</span>
+                          <NTag size="tiny" type="info" :bordered="false" round>
+                            {{ t('pages.chat.slash.subagents.agentTag') }}
+                          </NTag>
+                        </div>
+                        <div class="chat-slash-line chat-slash-desc">
+                          <span>{{ item.agent.model?.primary || '-' }}</span>
+                          <span class="chat-slash-flag">{{ t('pages.chat.slash.fromConfig') }}</span>
+                        </div>
+                      </div>
                       <div v-else-if="item.kind === 'new-default'">
                         <div class="chat-slash-line">
                           <span class="chat-slash-command">/new</span>
@@ -2339,6 +2568,9 @@ async function handleSend() {
                   <div v-else class="chat-slash-empty">
                     <template v-if="slashSkillMode">
                       {{ skillStore.loading ? t('pages.chat.slash.skills.loading') : t('pages.chat.slash.skills.noMatch') }}
+                    </template>
+                    <template v-else-if="slashSubagentsMode">
+                      {{ configStore.loading ? t('pages.chat.slash.subagents.loading') : t('pages.chat.slash.subagents.noMatch') }}
                     </template>
                     <template v-else-if="slashModelMode || slashNewMode">
                       {{ configStore.loading ? t('pages.chat.slash.models.loading') : t('pages.chat.slash.models.noMatch') }}
