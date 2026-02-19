@@ -141,18 +141,6 @@ function normalizeGfmTableBlocks(lines: string[]): string[] {
   return repaired
 }
 
-function parseTopLevelListItem(line: string): { kind: 'ul' | 'ol'; content: string } | null {
-  const unordered = line.match(/^[ \t]{0,3}[-*+]\s+(.+)$/)
-  if (unordered) {
-    return { kind: 'ul', content: unordered[1] || '' }
-  }
-  const ordered = line.match(/^[ \t]{0,3}\d{1,9}\.\s+(.+)$/)
-  if (ordered) {
-    return { kind: 'ol', content: ordered[1] || '' }
-  }
-  return null
-}
-
 function normalizeGroupingText(content: string): string {
   // 容忍常见 markdown 包裹（如 **摘要：**），避免分组识别被装饰符影响
   return content
@@ -163,7 +151,25 @@ function normalizeGroupingText(content: string): string {
 function looksLikeGroupTitle(content: string): boolean {
   const text = normalizeGroupingText(content)
   if (!text) return false
-  if (/\[[^\]]+]\(https?:\/\/[^)\s]+\)/.test(text)) return true
+  const hasMarkdownLink = /\[[^\]]+]\(https?:\/\/[^)\s]+\)/.test(text)
+  // 明显的“详情行”特征：带冒号、以句号/问号/感叹号收尾、或动作动词开头
+  if (/[：:]/.test(text)) return false
+  if (/[。！？!?]\s*$/.test(text)) return false
+  if (!hasMarkdownLink && /https?:\/\//i.test(text)) return false
+  if (/^(支持|新增|增加|修复|修正|优化|调整|移除|删除|合并|拆分|更新|改进|减少|提供|暴露|规范化)/u.test(text)) return false
+  if (text.length > 60) return false
+
+  // 强特征：链接、分隔符/括号、或常见“章节标题”尾缀
+  if (hasMarkdownLink) return true
+  if (/[\/]/.test(text)) return true
+  if (/[()（）]/.test(text)) return true
+  if (/(Changes|Fixes)\b/.test(text)) return true
+  if (/(支持|增强|能力|改进|修复)\s*$/u.test(text)) return true
+
+  // 弱特征兜底：短文本且不像一句完整描述
+  if (text.length <= 20 && /[\p{Script=Han}]/u.test(text)) return true
+  if (text.length <= 24 && /^[A-Za-z][A-Za-z0-9 ._-]*$/.test(text)) return true
+
   return false
 }
 
@@ -175,34 +181,102 @@ function looksLikeGroupSubItem(content: string): boolean {
   return false
 }
 
+function looksLikeStrongGroupTitle(content: string): boolean {
+  const text = normalizeGroupingText(content)
+  if (!text) return false
+  const hasMarkdownLink = /\[[^\]]+]\(https?:\/\/[^)\s]+\)/.test(text)
+  if (/[：:]/.test(text)) return false
+  if (/[。！？!?]\s*$/.test(text)) return false
+  if (!hasMarkdownLink && /https?:\/\//i.test(text)) return false
+  if (/^(支持|新增|增加|修复|修正|优化|调整|移除|删除|合并|拆分|更新|改进|减少|提供|暴露|规范化)/u.test(text)) return false
+  if (text.length > 60) return false
+  if (hasMarkdownLink) return true
+  if (/[\/]/.test(text)) return true
+  if (/[()（）]/.test(text)) return true
+  if (/(Changes|Fixes)\b/.test(text)) return true
+  if (/(支持|增强|能力|改进|修复)\s*$/u.test(text)) return true
+  return false
+}
+
 function autoNestListLines(lines: string[]): { lines: string[]; changed: boolean } {
   const next = [...lines]
   let inFence = false
-  let lastTitleEligible = false
   let changed = false
+
+  type ListItem = {
+    index: number
+    indent: number
+    content: string
+    isTitle: boolean
+    isStrongTitle: boolean
+  }
+
+  const readIndentWidth = (prefix: string) => prefix.replace(/\t/g, '    ').length
+  const parseListItem = (line: string): { indent: number; content: string } | null => {
+    const unordered = line.match(/^([ \t]*)([-*+])\s+(.+)$/)
+    if (unordered) return { indent: readIndentWidth(unordered[1] || ''), content: unordered[3] || '' }
+    const ordered = line.match(/^([ \t]*)(\d{1,9}\.)\s+(.+)$/)
+    if (ordered) return { indent: readIndentWidth(ordered[1] || ''), content: ordered[3] || '' }
+    return null
+  }
+
+  let segment: ListItem[] = []
+
+  const flushSegment = () => {
+    if (segment.length === 0) return
+
+    const baseIndent = Math.min(...segment.map((item) => item.indent))
+    const baseItems = segment.filter((item) => item.indent === baseIndent)
+    const titleCount = baseItems.reduce((acc, item) => acc + (item.isTitle ? 1 : 0), 0)
+    const firstTitle = baseItems.find((item) => item.isTitle)
+    const canGroupAll =
+      titleCount >= 2 ||
+      (titleCount === 1 && firstTitle?.isStrongTitle)
+
+    let inGroup = false
+    for (const item of baseItems) {
+      if (item.isTitle) {
+        inGroup = true
+        continue
+      }
+      if (!inGroup) continue
+
+      const shouldIndent = canGroupAll || looksLikeGroupSubItem(item.content)
+      if (!shouldIndent) continue
+
+      next[item.index] = `  ${next[item.index]}`
+      changed = true
+    }
+
+    segment = []
+  }
 
   for (let i = 0; i < next.length; i += 1) {
     const line = next[i] || ''
+
     if (isFenceDelimiter(line)) {
+      flushSegment()
       inFence = !inFence
-      lastTitleEligible = false
       continue
     }
     if (inFence) continue
 
-    const parsed = parseTopLevelListItem(line)
-    if (!parsed) continue
-
-    if (looksLikeGroupSubItem(parsed.content)) {
-      if (lastTitleEligible) {
-        next[i] = `  ${line}`
-        changed = true
-      }
+    const parsed = parseListItem(line)
+    if (!parsed) {
+      if (line.trim()) flushSegment()
       continue
     }
 
-    lastTitleEligible = looksLikeGroupTitle(parsed.content)
+    segment.push({
+      index: i,
+      indent: parsed.indent,
+      content: parsed.content,
+      isTitle: looksLikeGroupTitle(parsed.content),
+      isStrongTitle: looksLikeStrongGroupTitle(parsed.content),
+    })
   }
+
+  flushSegment()
 
   return { lines: next, changed }
 }
