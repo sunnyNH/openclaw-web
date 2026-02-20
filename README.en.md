@@ -1,6 +1,6 @@
 # OpenClaw Web
 
-[简体中文](./README.md) | **English**
+<p align="center"><a href="./README.md">简体中文</a> | <b>English</b></p>
 
 OpenClaw Web is a Vue 3 + Naive UI based admin console for OpenClaw Gateway. It aims to replace the default console UI and provide a clearer operations and configuration experience.
 
@@ -172,4 +172,3 @@ src/
 - [OpenClaw Docs](https://docs.openclaw.ai/)
 - [Vue 3](https://vuejs.org/)
 - [Naive UI](https://www.naiveui.com/)
-
