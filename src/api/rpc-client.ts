@@ -1991,7 +1991,17 @@ export class RPCClient {
   }
 
   resetSession(key: string): Promise<void> {
-    return this.callWithFallback(['sessions.reset', 'session.reset'], { key })
+    return this.callWithMethodAndParamsFallback(
+      ['sessions.reset', 'session.reset'],
+      [{ key, reason: 'reset' }, { key }]
+    )
+  }
+
+  newSession(key: string): Promise<void> {
+    return this.callWithMethodAndParamsFallback(
+      ['sessions.reset', 'session.reset'],
+      [{ key, reason: 'new' }, { key }]
+    )
   }
 
   deleteSession(key: string): Promise<void> {

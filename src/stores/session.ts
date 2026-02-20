@@ -98,6 +98,11 @@ export const useSessionStore = defineStore('session', () => {
     await fetchSessions()
   }
 
+  async function newSession(key: string) {
+    await wsStore.rpc.newSession(key)
+    await fetchSessions()
+  }
+
   async function deleteSession(key: string) {
     await wsStore.rpc.deleteSession(key)
     sessions.value = sessions.value.filter((s) => s.key !== key)
@@ -114,6 +119,7 @@ export const useSessionStore = defineStore('session', () => {
     fetchSessions,
     fetchSession,
     resetSession,
+    newSession,
     deleteSession,
     exportSession,
   }

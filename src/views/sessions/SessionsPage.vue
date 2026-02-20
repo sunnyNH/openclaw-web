@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
@@ -19,9 +18,8 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
+  AddOutline,
   ChatbubblesOutline,
-  DownloadOutline,
-  EyeOutline,
   RefreshOutline,
   SearchOutline,
   TimeOutline,
@@ -29,7 +27,7 @@ import {
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '@/stores/session'
-import { downloadJSON, formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
+import { formatRelativeTime, parseSessionKey } from '@/utils/format'
 import type { Session } from '@/api/types'
 
 type SortMode = 'recent' | 'messages'
@@ -40,7 +38,6 @@ type SessionRow = Session & {
   active24h: boolean
 }
 
-const router = useRouter()
 const sessionStore = useSessionStore()
 const message = useMessage()
 const { t } = useI18n()
@@ -49,7 +46,6 @@ const searchQuery = ref('')
 const channelFilter = ref<string>('all')
 const modelFilter = ref<string>('all')
 const sortMode = ref<SortMode>('recent')
-const selectedSessionKey = ref('')
 
 const sortOptions = computed<SelectOption[]>(() => ([
   { label: t('pages.sessions.list.sort.recent'), value: 'recent' },
@@ -130,10 +126,6 @@ const stats = computed(() => {
   }
 })
 
-const selectedSession = computed<SessionRow | null>(() =>
-  filteredSessions.value.find((item) => item.key === selectedSessionKey.value) || null
-)
-
 const sessionColumns = computed<DataTableColumns<SessionRow>>(() => ([
   {
     title: t('pages.sessions.list.columns.session'),
@@ -183,24 +175,58 @@ const sessionColumns = computed<DataTableColumns<SessionRow>>(() => ([
       return row.lastActivity ? formatRelativeTime(row.lastActivity) : '-'
     },
   },
-]))
-
-watch(
-  filteredSessions,
-  (list) => {
-    if (!list.length) {
-      selectedSessionKey.value = ''
-      return
-    }
-
-    if (!selectedSessionKey.value || !list.some((item) => item.key === selectedSessionKey.value)) {
-      const first = list[0]
-      if (!first) return
-      selectedSessionKey.value = first.key
-    }
+  {
+    title: t('pages.sessions.list.columns.actions'),
+    key: 'actions',
+    width: 170,
+    render(row) {
+      return h(NSpace, { size: 8, wrap: false, class: 'sessions-row-actions' }, () => [
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => handleNew(row) },
+          {
+            trigger: () => h(
+              NButton,
+              {
+                size: 'small',
+                type: 'info',
+                secondary: true,
+                strong: true,
+                class: 'sessions-action-btn sessions-action-btn--new',
+              },
+              {
+                icon: () => h(NIcon, { component: AddOutline }),
+                default: () => t('pages.sessions.list.newAction'),
+              }
+            ),
+            default: () => t('pages.sessions.list.confirmNew'),
+          }
+        ),
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => handleDelete(row) },
+          {
+            trigger: () => h(
+              NButton,
+              {
+                size: 'small',
+                type: 'error',
+                secondary: true,
+                strong: true,
+                class: 'sessions-action-btn sessions-action-btn--delete',
+              },
+              {
+                icon: () => h(NIcon, { component: TrashOutline }),
+                default: () => t('common.delete'),
+              }
+            ),
+            default: () => t('pages.sessions.detail.confirmDelete'),
+          }
+        ),
+      ])
+    },
   },
-  { immediate: true }
-)
+]))
 
 onMounted(() => {
   void sessionStore.fetchSessions()
@@ -217,19 +243,6 @@ function isActiveIn24h(timestamp: number): boolean {
   return Date.now() - timestamp <= 24 * 60 * 60 * 1000
 }
 
-function sessionRowProps(row: SessionRow) {
-  return {
-    style: 'cursor: pointer;',
-    onClick: () => {
-      selectedSessionKey.value = row.key
-    },
-  }
-}
-
-function sessionRowClassName(row: SessionRow) {
-  return row.key === selectedSessionKey.value ? 'session-row-active' : ''
-}
-
 function clearFilters() {
   searchQuery.value = ''
   channelFilter.value = 'all'
@@ -237,20 +250,16 @@ function clearFilters() {
   sortMode.value = 'recent'
 }
 
-function handleView(session: SessionRow) {
-  router.push({ name: 'SessionDetail', params: { key: encodeURIComponent(session.key) } })
-}
-
 async function handleRefresh() {
   await sessionStore.fetchSessions()
 }
 
-async function handleReset(session: SessionRow) {
+async function handleNew(session: SessionRow) {
   try {
-    await sessionStore.resetSession(session.key)
-    message.success(t('pages.sessions.detail.resetSuccess'))
+    await sessionStore.newSession(session.key)
+    message.success(t('pages.sessions.list.newSuccess'))
   } catch {
-    message.error(t('pages.sessions.detail.resetFailed'))
+    message.error(t('pages.sessions.list.newFailed'))
   }
 }
 
@@ -260,16 +269,6 @@ async function handleDelete(session: SessionRow) {
     message.success(t('pages.sessions.detail.deleteSuccess'))
   } catch {
     message.error(t('pages.sessions.detail.deleteFailed'))
-  }
-}
-
-async function handleExport(session: SessionRow) {
-  try {
-    const data = await sessionStore.exportSession(session.key)
-    downloadJSON(data, `session-${session.key.replace(/:/g, '-')}.json`)
-    message.success(t('pages.sessions.detail.exportSuccess'))
-  } catch {
-    message.error(t('pages.sessions.detail.exportFailed'))
   }
 }
 </script>
@@ -345,110 +344,24 @@ async function handleExport(session: SessionRow) {
       </div>
     </NCard>
 
-    <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
-      <NGridItem :span="2" class="sessions-grid-item">
-        <NCard :title="t('pages.sessions.list.listTitle')" class="sessions-card">
-          <template #header-extra>
-            <NText depth="3" style="font-size: 12px;">
-              {{ t('pages.sessions.list.listCount', { current: filteredSessions.length, total: stats.total }) }}
-            </NText>
-          </template>
+    <NCard :title="t('pages.sessions.list.listTitle')" class="sessions-card">
+      <template #header-extra>
+        <NText depth="3" style="font-size: 12px;">
+          {{ t('pages.sessions.list.listCount', { current: filteredSessions.length, total: stats.total }) }}
+        </NText>
+      </template>
 
-          <NDataTable
-            :columns="sessionColumns"
-            :data="filteredSessions"
-            :loading="sessionStore.loading"
-            :bordered="false"
-            :row-key="(row: SessionRow) => row.key"
-            :pagination="{ pageSize: 12 }"
-            :row-props="sessionRowProps"
-            :row-class-name="sessionRowClassName"
-            :scroll-x="860"
-            striped
-          />
-        </NCard>
-      </NGridItem>
-
-      <NGridItem :span="1" class="sessions-grid-item">
-        <NCard :title="t('pages.sessions.list.actionsTitle')" class="sessions-card sessions-side-card">
-          <template v-if="selectedSession">
-            <NSpace vertical :size="10">
-              <div class="session-selected-key">
-                <code>{{ selectedSession.key }}</code>
-              </div>
-
-              <NSpace :size="6" style="flex-wrap: wrap;">
-                <NTag size="small" type="info" :bordered="false">{{ selectedSession.parsed.agent }}</NTag>
-                <NTag size="small" :bordered="false">{{ selectedSession.parsed.channel }}</NTag>
-                <NTag size="small" :bordered="false" :type="selectedSession.active24h ? 'success' : 'default'">
-                  {{ selectedSession.active24h ? t('pages.sessions.list.badges.active24h') : t('pages.sessions.list.badges.inactive') }}
-                </NTag>
-              </NSpace>
-
-              <div class="session-meta-grid">
-                <div class="session-meta-item">
-                  <NText depth="3">{{ t('pages.sessions.list.meta.peer') }}</NText>
-                  <div class="session-meta-value">{{ selectedSession.parsed.peer || '-' }}</div>
-                </div>
-                <div class="session-meta-item">
-                  <NText depth="3">{{ t('pages.sessions.list.meta.messageCount') }}</NText>
-                  <div class="session-meta-value">{{ selectedSession.messageCount }}</div>
-                </div>
-                <div class="session-meta-item">
-                  <NText depth="3">{{ t('pages.sessions.list.meta.model') }}</NText>
-                  <div class="session-meta-value">{{ selectedSession.model || '-' }}</div>
-                </div>
-                <div class="session-meta-item">
-                  <NText depth="3">{{ t('pages.sessions.list.meta.lastActivity') }}</NText>
-                  <div class="session-meta-value">{{ selectedSession.lastActivity ? formatRelativeTime(selectedSession.lastActivity) : '-' }}</div>
-                </div>
-              </div>
-
-              <NText depth="3" style="font-size: 12px;">
-                {{ t('pages.sessions.list.activeTime', { time: selectedSession.lastActivity ? formatDate(selectedSession.lastActivity) : '-' }) }}
-              </NText>
-
-              <NSpace :size="8" wrap>
-                <NButton size="small" type="primary" @click="handleView(selectedSession)">
-                  <template #icon><NIcon :component="EyeOutline" /></template>
-                  {{ t('pages.sessions.list.viewDetail') }}
-                </NButton>
-                <NButton size="small" @click="handleExport(selectedSession)">
-                  <template #icon><NIcon :component="DownloadOutline" /></template>
-                  {{ t('common.export') }}
-                </NButton>
-                <NPopconfirm @positive-click="handleReset(selectedSession)">
-                  <template #trigger>
-                    <NButton size="small">
-                      <template #icon><NIcon :component="RefreshOutline" /></template>
-                      {{ t('common.reset') }}
-                    </NButton>
-                  </template>
-                  {{ t('pages.sessions.list.confirmReset') }}
-                </NPopconfirm>
-                <NPopconfirm @positive-click="handleDelete(selectedSession)">
-                  <template #trigger>
-                    <NButton size="small" type="error">
-                      <template #icon><NIcon :component="TrashOutline" /></template>
-                      {{ t('common.delete') }}
-                    </NButton>
-                  </template>
-                  {{ t('pages.sessions.detail.confirmDelete') }}
-                </NPopconfirm>
-              </NSpace>
-
-              <NAlert type="default" :bordered="false">
-                {{ t('pages.sessions.list.summary', { text: truncate(selectedSession.parsed.peer || selectedSession.key, 56) }) }}
-              </NAlert>
-            </NSpace>
-          </template>
-
-          <div v-else class="sessions-empty-side">
-            {{ t('pages.sessions.list.emptySide') }}
-          </div>
-        </NCard>
-      </NGridItem>
-    </NGrid>
+      <NDataTable
+        :columns="sessionColumns"
+        :data="filteredSessions"
+        :loading="sessionStore.loading"
+        :bordered="false"
+        :row-key="(row: SessionRow) => row.key"
+        :pagination="{ pageSize: 12 }"
+        :scroll-x="980"
+        striped
+      />
+    </NCard>
   </div>
 </template>
 
@@ -491,74 +404,33 @@ async function handleExport(session: SessionRow) {
   gap: 8px;
 }
 
-.sessions-grid-item {
-  min-width: 0;
-}
-
 .sessions-card {
   border-radius: var(--radius-lg);
 }
 
-.sessions-side-card {
-  height: 100%;
+.sessions-row-actions {
+  align-items: center;
 }
 
-.session-selected-key {
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  overflow: hidden;
-}
-
-.session-selected-key code {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-}
-
-.session-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.session-meta-item {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: var(--bg-primary);
-}
-
-.session-meta-value {
-  margin-top: 4px;
+.sessions-action-btn {
+  min-width: 72px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
   font-size: 13px;
-  word-break: break-word;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.sessions-empty-side {
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-  padding: 40px 0;
-  text-align: center;
-}
-
-:deep(.session-row-active td) {
-  background: rgba(32, 128, 240, 0.12) !important;
+.sessions-action-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
 }
 
 @media (max-width: 1100px) {
   .sessions-filter-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .session-meta-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>

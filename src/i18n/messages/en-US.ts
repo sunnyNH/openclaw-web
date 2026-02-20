@@ -1143,7 +1143,7 @@ export default {
       },
       list: {
         title: 'Sessions',
-        hint: 'Filter sessions first, then view/export/reset/delete on the right to avoid mistakes.',
+        hint: 'Session actions are in the table action column: new uses the official new-session semantics, delete uses the official delete semantics.',
         metrics: {
           totalSessions: 'Total sessions',
           active24h: 'Active (24h)',
@@ -1169,6 +1169,7 @@ export default {
           messageCount: 'Messages',
           model: 'Model',
           lastActivity: 'Last active',
+          actions: 'Actions',
         },
         badges: {
           active24h: 'Active (24h)',
@@ -1185,6 +1186,10 @@ export default {
         },
         activeTime: 'Last active: {time}',
         viewDetail: 'View detail',
+        newAction: 'new',
+        confirmNew: 'Start a new run for this session?',
+        newSuccess: 'New session started',
+        newFailed: 'Failed to start a new session',
         confirmReset: 'Reset this session?',
         summary: 'Summary: {text}',
         emptySide: 'Select a session on the left to view/export/reset/delete.',

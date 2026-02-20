@@ -1143,7 +1143,7 @@ export default {
       },
       list: {
         title: '会话管理',
-        hint: '先筛选会话，再在右侧执行查看详情、导出、重置、删除等操作，避免误操作。',
+        hint: '会话操作已收敛到列表操作列：new 使用官方会话新建语义，删除使用官方会话删除语义。',
         metrics: {
           totalSessions: '会话总数',
           active24h: '24h 活跃',
@@ -1169,6 +1169,7 @@ export default {
           messageCount: '消息数',
           model: '模型',
           lastActivity: '最近活动',
+          actions: '操作',
         },
         badges: {
           active24h: '24h 活跃',
@@ -1185,6 +1186,10 @@ export default {
         },
         activeTime: '活动时间：{time}',
         viewDetail: '查看详情',
+        newAction: 'new',
+        confirmNew: '确认为该会话启动新会话？',
+        newSuccess: '已启动新会话',
+        newFailed: '启动新会话失败',
         confirmReset: '确认重置该会话？',
         summary: '当前会话摘要：{text}',
         emptySide: '从左侧选择会话后，可进行查看详情、导出、重置或删除。',
