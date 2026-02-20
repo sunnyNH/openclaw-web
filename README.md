@@ -50,6 +50,15 @@ openclaw devices list
 openclaw devices approve <requestId>
 ```
 
+如果 CLI 报错 `SECURITY ERROR: Gateway URL "ws://..." uses plaintext ws:// to a non-loopback address`（常见于将 Gateway 绑定到 LAN 并使用内网 IP 直连），建议在 **Gateway 所在机器** 使用 loopback 地址并显式传入 token：
+
+```bash
+openclaw devices list --url ws://127.0.0.1:18789 --token <gateway-token>
+openclaw devices approve <requestId> --url ws://127.0.0.1:18789 --token <gateway-token>
+```
+
+部分环境下可能需要在命令前加 `sudo`（注意：`sudo` 可能会切换到 root 的配置目录，导致读取不同的 `openclaw.json`）。
+
 也可以直接批准最新一条待审批请求：
 
 ```bash

@@ -50,6 +50,15 @@ openclaw devices list
 openclaw devices approve <requestId>
 ```
 
+If the CLI fails with `SECURITY ERROR: Gateway URL "ws://..." uses plaintext ws:// to a non-loopback address` (common when the Gateway binds to LAN and you connect via a private IP), run the commands on the Gateway host with a loopback URL and an explicit token:
+
+```bash
+openclaw devices list --url ws://127.0.0.1:18789 --token <gateway-token>
+openclaw devices approve <requestId> --url ws://127.0.0.1:18789 --token <gateway-token>
+```
+
+In some environments you may need to prefix the command with `sudo` (note: `sudo` may switch to the root config directory and therefore read a different `openclaw.json`).
+
 You can also approve the latest pending request directly:
 
 ```bash
