@@ -1,5 +1,7 @@
 # OpenClaw Web
 
+**简体中文** | [English](./README.en.md)
+
 OpenClaw Web 是一个基于 Vue 3 + Naive UI 的 OpenClaw Gateway 管理后台，目标是替代默认控制台 UI，提供更清晰的运维与配置体验。
 
 ![OpenClaw Web Dashboard](./docs/images/home.png)
