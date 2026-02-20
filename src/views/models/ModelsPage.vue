@@ -27,15 +27,13 @@ import {
   NText,
   useMessage,
 } from 'naive-ui'
-import { AddOutline, RefreshOutline, SaveOutline, SearchOutline } from '@vicons/ionicons5'
+import { AddOutline, RefreshOutline, SaveOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '@/stores/config'
-import { useWebSocketStore } from '@/stores/websocket'
 import type { DataTableColumns } from 'naive-ui'
 import type { ConfigPatch, ModelProviderConfig } from '@/api/types'
 
 const configStore = useConfigStore()
-const wsStore = useWebSocketStore()
 const message = useMessage()
 const { t, locale } = useI18n()
 
@@ -47,11 +45,8 @@ function joinDisplayList(values: string[]): string {
 const primaryModel = ref('')
 const selectedProviderId = ref('')
 const providerSearch = ref('')
-const probing = ref(false)
-const probeError = ref('')
+const showEditProviderModal = ref(false)
 const showCreateProviderModal = ref(false)
-const probingCreateProvider = ref(false)
-const createProbeError = ref('')
 const showSaveConfirmModal = ref(false)
 const confirmActionType = ref<'edit' | 'create'>('edit')
 const editActiveTab = ref<'basic' | 'models' | 'preview'>('basic')
@@ -65,6 +60,64 @@ const modelInputTypeOptions = [
 ]
 
 const DEFAULT_MODEL_INPUT_TYPES: ModelInputType[] = ['text']
+
+type QuickProviderKey = 'zhipu' | 'kimi' | 'minimax'
+
+type QuickProviderPreset = {
+  key: QuickProviderKey
+  providerId: string
+  api: string
+  baseUrl: string
+  modelId: string
+  modelName: string
+  input: ModelInputType[]
+  docsUrl: string
+}
+
+const QUICK_PROVIDER_PRESETS: Record<QuickProviderKey, QuickProviderPreset> = {
+  zhipu: {
+    key: 'zhipu',
+    providerId: 'zai',
+    api: 'openai-completions',
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    modelId: 'glm-5',
+    modelName: 'GLM-5',
+    input: ['text'],
+    docsUrl: 'https://docs.bigmodel.cn/cn/coding-plan/faq',
+  },
+  kimi: {
+    key: 'kimi',
+    providerId: 'moonshot',
+    api: 'openai-completions',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    modelId: 'kimi-k2.5',
+    modelName: 'Kimi K2.5',
+    input: ['text'],
+    docsUrl: 'https://platform.moonshot.cn/docs/introduction',
+  },
+  minimax: {
+    key: 'minimax',
+    providerId: 'minimax',
+    api: 'openai-completions',
+    baseUrl: 'https://api.minimaxi.com/v1',
+    modelId: 'MiniMax-M2.5',
+    modelName: 'MiniMax-M2.5',
+    input: ['text'],
+    docsUrl: 'https://platform.minimaxi.com/docs/api-reference/text-openai-api',
+  },
+}
+
+const quickProviderList = Object.values(QUICK_PROVIDER_PRESETS)
+const quickProviderApiKeys = reactive<Record<QuickProviderKey, string>>({
+  zhipu: '',
+  kimi: '',
+  minimax: '',
+})
+const quickProviderSaving = reactive<Record<QuickProviderKey, boolean>>({
+  zhipu: false,
+  kimi: false,
+  minimax: false,
+})
 
 const providerForm = reactive({
   id: '',
@@ -97,13 +150,6 @@ type ProviderSummary = {
   baseUrl: string
   modelIds: string[]
   sources: string[]
-}
-
-type ConfiguredModelRow = {
-  key: string
-  providerId: string
-  modelId: string
-  modelRef: string
 }
 
 type DefaultsModelsCatalogSnapshot = {
@@ -225,14 +271,6 @@ function readProviderText(
     }
   }
   return ''
-}
-
-function readProviderApiKeyForProbe(provider: ModelProviderConfig | Record<string, unknown> | undefined): string {
-  const raw = readProviderText(provider, ['apiKey', 'api_key', 'key', 'token', 'accessToken', 'access_token'])
-  const value = raw.trim()
-  if (!value) return ''
-  if (/^[*•]+$/.test(value)) return ''
-  return value
 }
 
 function normalizeModelInputTypes(value: unknown): ModelInputType[] {
@@ -575,23 +613,6 @@ const selectedProviderRawText = computed(() => {
   }
 })
 
-const configuredModelRows = computed<ConfiguredModelRow[]>(() => {
-  const rowsMap = new Map<string, ConfiguredModelRow>()
-  for (const provider of providerSummaries.value) {
-    for (const modelId of provider.modelIds) {
-      const modelRef = `${provider.id}/${modelId}`
-      rowsMap.set(modelRef, {
-        key: modelRef,
-        providerId: provider.id,
-        modelId,
-        modelRef,
-      })
-    }
-  }
-
-  return Array.from(rowsMap.values()).sort((a, b) => a.modelRef.localeCompare(b.modelRef))
-})
-
 const editingExistingProvider = computed(() => {
   const id = normalizeProviderId(providerForm.id || selectedProviderId.value)
   return !!id && !!providerMap.value[id]
@@ -634,7 +655,7 @@ const editChangePreview = computed(() => {
   const nextBaseUrl = providerForm.baseUrl.trim()
 
   const existingModelIds = normalizeUniqueIds(readProviderModelIds(existingProvider))
-  const nextModelIds = normalizeUniqueIds(
+  const nextModelIds = pickSingleProviderModelIds(
     currentModelIds.value.length > 0 ? currentModelIds.value : existingModelIds
   )
   const existingInputTypes = readProviderModelInputTypes(existingProvider)
@@ -681,13 +702,26 @@ const editChangePreview = computed(() => {
     warnings.push(t('pages.models.preview.warnings.removeModels'))
   }
 
+  const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
+  const modelReferenceSyncPatches = buildAgentModelReferenceSyncPatches(
+    providerId,
+    nextModelIds,
+    defaultsCatalogSnapshot.catalog
+  )
+  for (const patch of modelReferenceSyncPatches) {
+    if (!patchPaths.includes(patch.path)) {
+      patchPaths.push(patch.path)
+    }
+  }
+
   const hasChanges =
     apiChanged ||
     baseUrlChanged ||
     modelsChanged ||
     inputTypesChanged ||
     willPatchApiKey ||
-    !!inferredPrimary
+    !!inferredPrimary ||
+    modelReferenceSyncPatches.length > 0
 
   return {
     providerId,
@@ -727,7 +761,7 @@ const createChangePreview = computed(() => {
   const api = createProviderForm.api
   const baseUrl = createProviderForm.baseUrl.trim()
   const apiKey = createProviderForm.apiKey.trim()
-  const modelIds = normalizeUniqueIds(createCurrentModelIds.value)
+  const modelIds = pickSingleProviderModelIds(createCurrentModelIds.value)
   const inputTypes = createCurrentModelInputTypes.value
   const hasApiKey = !!apiKey
 
@@ -821,7 +855,7 @@ const selectedProviderSummary = computed(() =>
 )
 const providerStats = computed(() => {
   const providerCount = providerSummaries.value.length
-  const modelCount = configuredModelRows.value.length
+  const modelCount = providerSummaries.value.reduce((total, item) => total + item.modelIds.length, 0)
   return {
     providerCount,
     modelCount,
@@ -841,25 +875,6 @@ const currentPrimaryProviderId = computed(() => {
   const parsed = resolvedModelRef ? splitModelRef(resolvedModelRef) : null
   return parsed?.providerId || ''
 })
-
-function sourceLabel(source: string): string {
-  const map: Record<string, string> = {
-    'models.providers': 'models.providers',
-    models: 'models',
-    'models.primary': 'models.primary',
-    'models.fallback': 'models.fallback',
-    'agents.defaults.models': 'agents.defaults.models',
-    'agents.defaults.model.primary': 'agents.defaults.model.primary',
-    'agents.defaults.model.fallback': 'agents.defaults.model.fallback',
-  }
-  return map[source] || source
-}
-
-function sourceTagType(source: string): 'default' | 'info' | 'success' | 'warning' {
-  if (source === 'models.providers') return 'success'
-  if (source === 'models') return 'info'
-  return 'warning'
-}
 
 const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
   {
@@ -891,39 +906,36 @@ const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
   },
   {
     title: t('pages.models.table.providers.models'),
-    key: 'modelCount',
-    width: 76,
-    align: 'center',
-    render(row) {
-      return `${row.modelIds.length}`
-    },
-  },
-  {
-    title: t('pages.models.table.providers.sources'),
-    key: 'sources',
-    width: 84,
-    align: 'center',
+    key: 'models',
+    width: 220,
     ellipsis: { tooltip: true },
     render(row) {
-      return row.sources.length > 0 ? t('common.itemsCount', { count: row.sources.length }) : '-'
+      return row.modelIds.join(', ') || '-'
     },
   },
   {
     title: t('pages.models.table.providers.actions'),
     key: 'actions',
-    width: 214,
+    width: 272,
     render(row) {
       const isPrimaryProvider = row.id === currentPrimaryProviderId.value
       const isManagedProvider = managedProviderIdSet.value.has(row.id)
       return h(
         NSpace,
-        { size: 2, wrap: false },
+        { size: 8, wrap: false, class: 'models-provider-actions' },
         () => [
           ...(isManagedProvider
             ? [
                 h(
                   NButton,
-                  { size: 'tiny', quaternary: true, onClick: () => handleLoadProvider(row.id) },
+                  {
+                    size: 'small',
+                    type: 'info',
+                    secondary: true,
+                    strong: true,
+                    class: 'models-action-btn models-action-btn--edit',
+                    onClick: () => handleLoadProvider(row.id)
+                  },
                   { default: () => t('common.edit') }
                 ),
               ]
@@ -931,9 +943,13 @@ const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
           h(
             NButton,
             {
-              size: 'tiny',
-              type: isPrimaryProvider ? 'default' : 'primary',
-              tertiary: !isPrimaryProvider,
+              size: 'small',
+              type: isPrimaryProvider ? 'default' : 'success',
+              secondary: true,
+              strong: true,
+              class: isPrimaryProvider
+                ? 'models-action-btn models-action-btn--active'
+                : 'models-action-btn models-action-btn--primary',
               disabled: isPrimaryProvider,
               onClick: () => handleUseProviderAsPrimary(row.id, row.modelIds),
             },
@@ -953,9 +969,11 @@ const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
                       h(
                         NButton,
                         {
-                          size: 'tiny',
-                          quaternary: true,
+                          size: 'small',
                           type: 'error',
+                          secondary: true,
+                          strong: true,
+                          class: 'models-action-btn models-action-btn--delete',
                           disabled: isPrimaryProvider,
                           onClick: (e: MouseEvent) => e.stopPropagation(),
                         },
@@ -988,37 +1006,6 @@ function providerRowProps(row: ProviderSummary) {
     onClick: () => handleLoadProvider(row.id),
   }
 }
-
-const configuredModelColumns = computed<DataTableColumns<ConfiguredModelRow>>(() => [
-  {
-    title: t('pages.models.table.models.modelRef'),
-    key: 'modelRef',
-    minWidth: 260,
-    ellipsis: { tooltip: true },
-    render(row) {
-      return h('code', { style: 'font-size: 12px;' }, row.modelRef)
-    },
-  },
-  {
-    title: t('pages.models.table.models.actions'),
-    key: 'actions',
-    width: 120,
-    render(row) {
-      const isPrimaryModel = row.modelRef === primaryModelDisplay.value
-      return h(
-        NButton,
-        {
-          size: 'tiny',
-          type: isPrimaryModel ? 'default' : 'primary',
-          tertiary: !isPrimaryModel,
-          disabled: isPrimaryModel,
-          onClick: () => handleUseModelAsPrimary(row.modelRef),
-        },
-        { default: () => (isPrimaryModel ? t('pages.models.default.active') : t('pages.models.default.set')) }
-      )
-    },
-  },
-])
 
 watch(
   () => configStore.config,
@@ -1071,6 +1058,30 @@ function normalizeUniqueIds(ids: string[]): string[] {
         .filter(Boolean)
     )
   ).sort((a, b) => a.localeCompare(b))
+}
+
+function pickSingleProviderModelIds(ids: string[]): string[] {
+  const seen = new Set<string>()
+  for (const raw of ids) {
+    const id = raw.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    return [id]
+  }
+  return []
+}
+
+function normalizeSingleModelInput(value: string): string {
+  const first = pickSingleProviderModelIds(parseModelIds(value))[0]
+  return first || ''
+}
+
+function updateProviderSingleModelText(value: string): void {
+  providerForm.modelIdsText = normalizeSingleModelInput(value)
+}
+
+function updateCreateSingleModelText(value: string): void {
+  createProviderForm.modelIdsText = normalizeSingleModelInput(value)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -1233,6 +1244,18 @@ function buildAllowlistEntriesFromProvider(
   }))
 }
 
+function isJsonValueEqual(before: unknown, after: unknown): boolean {
+  return JSON.stringify(before ?? null) === JSON.stringify(after ?? null)
+}
+
+function buildProviderModelRefSet(providerId: string, modelIds: string[]): Set<string> {
+  const refs = new Set<string>()
+  for (const modelId of normalizeUniqueIds(modelIds)) {
+    refs.add(`${providerId}/${modelId}`)
+  }
+  return refs
+}
+
 function buildDefaultsModelsCatalogWithoutProvider(providerId: string): Record<string, unknown> | null {
   const existingSnapshot = readExistingDefaultsModelsCatalog()
   const existing = existingSnapshot.catalog
@@ -1249,7 +1272,8 @@ function buildDefaultsModelsCatalogWithoutProvider(providerId: string): Record<s
     next[modelRef] = entry
   }
 
-  return changed ? next : null
+  if (!changed) return null
+  return Object.keys(next).length > 0 ? next : null
 }
 
 function buildDefaultsModelsCatalogSyncedForProvider(
@@ -1261,10 +1285,10 @@ function buildDefaultsModelsCatalogSyncedForProvider(
   const existing = existingSnapshot.catalog
   if (!existing && !options?.createWhenMissing) return null
 
-  const base = existing ? { ...existing } : buildBootstrapDefaultsModelsCatalog()
   const incomingEntries = buildAllowlistEntriesFromProvider(providerId, modelIds)
   const incomingEntryMap = new Map(incomingEntries.map((entry) => [entry.modelRef, entry]))
 
+  const base = existing ? { ...existing } : buildBootstrapDefaultsModelsCatalog()
   const next: Record<string, unknown> = {}
   let changed = existingSnapshot.normalized || (!existing && Object.keys(base).length > 0)
 
@@ -1283,7 +1307,7 @@ function buildDefaultsModelsCatalogSyncedForProvider(
     const normalizedEntry = normalizeDefaultsModelCatalogEntry(entry, incoming.alias)
     next[modelRef] = normalizedEntry
     incomingEntryMap.delete(modelRef)
-    if (JSON.stringify(normalizedEntry) !== JSON.stringify(entry ?? {})) {
+    if (!isJsonValueEqual(entry ?? {}, normalizedEntry)) {
       changed = true
     }
   }
@@ -1295,13 +1319,17 @@ function buildDefaultsModelsCatalogSyncedForProvider(
     changed = true
   }
 
-  return changed ? next : null
+  if (!changed) return null
+  return Object.keys(next).length > 0 ? next : null
 }
 
-function filterModelRefArrayWithoutProvider(
+function filterModelRefArrayByProviderSync(
   value: unknown,
-  providerId: string,
-  defaultsModelsCatalog: Record<string, unknown> | null
+  options: {
+    providerId: string
+    allowedModelRefs: Set<string>
+    defaultsModelsCatalog: Record<string, unknown> | null
+  }
 ): { changed: boolean; value: string[] } {
   if (!Array.isArray(value)) {
     return { changed: false, value: [] }
@@ -1325,8 +1353,12 @@ function filterModelRefArrayWithoutProvider(
       changed = true
     }
 
-    const resolvedModelRef = resolveModelRefFromConfigValue(item, defaultsModelsCatalog)
-    if (resolvedModelRef && isModelRefFromProvider(resolvedModelRef, providerId)) {
+    const resolvedModelRef = resolveModelRefFromConfigValue(item, options.defaultsModelsCatalog)
+    if (
+      resolvedModelRef &&
+      isModelRefFromProvider(resolvedModelRef, options.providerId) &&
+      !options.allowedModelRefs.has(resolvedModelRef)
+    ) {
       changed = true
       continue
     }
@@ -1336,34 +1368,129 @@ function filterModelRefArrayWithoutProvider(
   return { changed, value: next }
 }
 
-function buildProviderModelReferenceCleanupPatches(
+function syncSingleModelConfigForProvider(
+  modelConfig: Record<string, unknown>,
+  options: {
+    providerId: string
+    replacementPrimary: string | null
+    allowedModelRefs: Set<string>
+    defaultsModelsCatalog: Record<string, unknown> | null
+  }
+): { changed: boolean; model: Record<string, unknown> } {
+  const nextModel = { ...modelConfig }
+  let changed = false
+
+  const primaryModelRef = resolveModelRefFromConfigValue(modelConfig.primary, options.defaultsModelsCatalog)
+  if (
+    primaryModelRef &&
+    isModelRefFromProvider(primaryModelRef, options.providerId) &&
+    !options.allowedModelRefs.has(primaryModelRef)
+  ) {
+    nextModel.primary = options.replacementPrimary
+    changed = true
+  }
+
+  const fallbacks = filterModelRefArrayByProviderSync(modelConfig.fallbacks, {
+    providerId: options.providerId,
+    allowedModelRefs: options.allowedModelRefs,
+    defaultsModelsCatalog: options.defaultsModelsCatalog,
+  })
+  if (fallbacks.changed) {
+    nextModel.fallbacks = fallbacks.value.length > 0 ? fallbacks.value : null
+    changed = true
+  }
+
+  const legacyFallback = filterModelRefArrayByProviderSync(modelConfig.fallback, {
+    providerId: options.providerId,
+    allowedModelRefs: options.allowedModelRefs,
+    defaultsModelsCatalog: options.defaultsModelsCatalog,
+  })
+  if (legacyFallback.changed) {
+    nextModel.fallback = legacyFallback.value.length > 0 ? legacyFallback.value : null
+    changed = true
+  }
+
+  return {
+    changed,
+    model: nextModel,
+  }
+}
+
+function buildAgentModelReferenceSyncPatches(
   providerId: string,
+  modelIds: string[],
   defaultsModelsCatalog: Record<string, unknown> | null
 ): ConfigPatch[] {
   const patches: ConfigPatch[] = []
+  const normalizedModelIds = normalizeUniqueIds(modelIds)
+  const replacementPrimary = normalizedModelIds[0] ? `${providerId}/${normalizedModelIds[0]}` : null
+  const allowedModelRefs = buildProviderModelRefSet(providerId, normalizedModelIds)
 
   const agents = asRecord(configStore.config?.agents)
   const defaults = asRecord(agents?.defaults)
   const defaultModel = asRecord(defaults?.model)
   if (defaultModel) {
-    const primaryModelRef = resolveModelRefFromConfigValue(defaultModel.primary, defaultsModelsCatalog)
-    if (primaryModelRef && isModelRefFromProvider(primaryModelRef, providerId)) {
-      patches.push({ path: 'agents.defaults.model.primary', value: null })
-    }
-
-    const fallbacks = filterModelRefArrayWithoutProvider(defaultModel.fallbacks, providerId, defaultsModelsCatalog)
-    if (fallbacks.changed) {
+    const synced = syncSingleModelConfigForProvider(defaultModel, {
+      providerId,
+      replacementPrimary,
+      allowedModelRefs,
+      defaultsModelsCatalog,
+    })
+    if (!isJsonValueEqual(defaultModel.primary, synced.model.primary)) {
       patches.push({
-        path: 'agents.defaults.model.fallbacks',
-        value: fallbacks.value.length > 0 ? fallbacks.value : null,
+        path: 'agents.defaults.model.primary',
+        value: synced.model.primary ?? null,
       })
     }
-
-    const legacyFallback = filterModelRefArrayWithoutProvider(defaultModel.fallback, providerId, defaultsModelsCatalog)
-    if (legacyFallback.changed) {
+    if (!isJsonValueEqual(defaultModel.fallbacks, synced.model.fallbacks)) {
+      patches.push({
+        path: 'agents.defaults.model.fallbacks',
+        value: synced.model.fallbacks ?? null,
+      })
+    }
+    if (!isJsonValueEqual(defaultModel.fallback, synced.model.fallback)) {
       patches.push({
         path: 'agents.defaults.model.fallback',
-        value: legacyFallback.value.length > 0 ? legacyFallback.value : null,
+        value: synced.model.fallback ?? null,
+      })
+    }
+  }
+
+  const listRaw = Array.isArray(agents?.list) ? agents.list : []
+  if (listRaw.length > 0) {
+    let listChanged = false
+    const nextList = listRaw.map((agentRaw) => {
+      if (!agentRaw || typeof agentRaw !== 'object' || Array.isArray(agentRaw)) {
+        return agentRaw
+      }
+
+      const agent = agentRaw as Record<string, unknown>
+      const model = asRecord(agent.model)
+      if (!model) {
+        return agentRaw
+      }
+
+      const synced = syncSingleModelConfigForProvider(model, {
+        providerId,
+        replacementPrimary,
+        allowedModelRefs,
+        defaultsModelsCatalog,
+      })
+      if (!synced.changed) {
+        return agentRaw
+      }
+
+      listChanged = true
+      return {
+        ...agent,
+        model: synced.model,
+      }
+    })
+
+    if (listChanged) {
+      patches.push({
+        path: 'agents.list',
+        value: nextList,
       })
     }
   }
@@ -1388,7 +1515,6 @@ function resetEditorForm() {
   providerForm.apiKey = ''
   providerForm.modelInputTypes = [...DEFAULT_MODEL_INPUT_TYPES]
   providerForm.modelIdsText = ''
-  probeError.value = ''
 }
 
 function resetCreateProviderForm() {
@@ -1398,76 +1524,6 @@ function resetCreateProviderForm() {
   createProviderForm.apiKey = ''
   createProviderForm.modelInputTypes = [...DEFAULT_MODEL_INPUT_TYPES]
   createProviderForm.modelIdsText = ''
-  createProbeError.value = ''
-}
-
-function buildProbeUrls(baseUrl: string, apiType: string): string[] {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '')
-  if (!trimmed) return []
-
-  if (apiType === 'google-generative-ai') {
-    if (/\/models$/i.test(trimmed)) {
-      return [trimmed]
-    }
-    return [`${trimmed}/models`]
-  }
-
-  const urls = []
-  if (/\/models$/i.test(trimmed)) {
-    urls.push(trimmed)
-  } else {
-    urls.push(`${trimmed}/models`)
-    if (!/\/v1$/i.test(trimmed)) {
-      urls.push(`${trimmed}/v1/models`)
-    }
-  }
-
-  return Array.from(new Set(urls))
-}
-
-function appendApiKeyToUrl(url: string, apiKey: string): string {
-  try {
-    const parsed = new URL(url)
-    if (!parsed.searchParams.has('key')) {
-      parsed.searchParams.set('key', apiKey)
-    }
-    return parsed.toString()
-  } catch {
-    const separator = url.includes('?') ? '&' : '?'
-    return `${url}${separator}key=${encodeURIComponent(apiKey)}`
-  }
-}
-
-function parseModelIdsFromPayload(payload: unknown): string[] {
-  const ids = new Set<string>()
-
-  const collect = (value: unknown) => {
-    if (!value) return
-    if (typeof value === 'string') {
-      ids.add(value)
-      return
-    }
-    if (typeof value === 'object' && !Array.isArray(value)) {
-      const row = value as Record<string, unknown>
-      if (typeof row.id === 'string' && row.id.trim()) ids.add(row.id)
-      else if (typeof row.name === 'string' && row.name.trim()) ids.add(row.name)
-      return
-    }
-  }
-
-  if (Array.isArray(payload)) {
-    payload.forEach(collect)
-    return Array.from(ids)
-  }
-
-  if (payload && typeof payload === 'object') {
-    const row = payload as Record<string, unknown>
-    if (Array.isArray(row.data)) row.data.forEach(collect)
-    if (Array.isArray(row.models)) row.models.forEach(collect)
-    if (Array.isArray(row.items)) row.items.forEach(collect)
-  }
-
-  return Array.from(ids)
 }
 
 function loadProviderForm(providerId: string) {
@@ -1479,8 +1535,7 @@ function loadProviderForm(providerId: string) {
   providerForm.modelInputTypes = readProviderModelInputTypes(provider)
   // 不回显线上 Key，避免在 UI 里泄露；编辑时可重新输入覆盖
   providerForm.apiKey = ''
-  providerForm.modelIdsText = readProviderModelIds(provider).join('\n')
-  probeError.value = ''
+  providerForm.modelIdsText = pickSingleProviderModelIds(readProviderModelIds(provider)).join('\n')
 }
 
 function handleNewProvider() {
@@ -1496,6 +1551,12 @@ function openSaveConfirm(action: 'edit' | 'create') {
 
 function handleLoadProvider(providerId: string) {
   selectedProviderId.value = providerId
+  editActiveTab.value = 'basic'
+  showEditProviderModal.value = true
+}
+
+function handleCloseEditProviderModal() {
+  showEditProviderModal.value = false
   editActiveTab.value = 'basic'
 }
 
@@ -1543,12 +1604,6 @@ async function handleUseProviderAsPrimary(providerId: string, modelIds: string[]
   await savePrimaryModel(primary)
 }
 
-async function handleUseModelAsPrimary(modelRef: string) {
-  const value = modelRef.trim()
-  if (!value) return
-  await savePrimaryModel(value)
-}
-
 async function handleDeleteProvider(providerIdInput: string): Promise<void> {
   const providerId = normalizeProviderId(providerIdInput)
   if (!providerId) return
@@ -1569,15 +1624,15 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
   ]
 
   const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
-  const nextDefaultsModels = buildDefaultsModelsCatalogWithoutProvider(providerId)
-  if (nextDefaultsModels) {
+  const defaultsModelsPatch = buildDefaultsModelsCatalogWithoutProvider(providerId)
+  if (defaultsModelsPatch) {
     patches.push({
       path: 'agents.defaults.models',
-      value: Object.keys(nextDefaultsModels).length > 0 ? nextDefaultsModels : null,
+      value: defaultsModelsPatch,
     })
   }
   patches.push(
-    ...buildProviderModelReferenceCleanupPatches(providerId, defaultsCatalogSnapshot.catalog)
+    ...buildAgentModelReferenceSyncPatches(providerId, [], defaultsCatalogSnapshot.catalog)
   )
 
   const finalPatches = dedupeConfigPatchesByPath(patches)
@@ -1587,129 +1642,12 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
     if (selectedProviderId.value === providerId) {
       selectedProviderId.value = ''
     }
+    if (currentEditingProviderId.value === providerId) {
+      showEditProviderModal.value = false
+    }
     message.success(t('pages.models.messages.providerDeleted', { id: providerId }))
   } catch (error) {
     message.error(error instanceof Error ? error.message : t('pages.models.messages.deleteFailed'))
-  }
-}
-
-async function probeModelsFromProvider(baseUrl: string, apiKey: string, apiType: string): Promise<string[]> {
-  const urls = buildProbeUrls(baseUrl, apiType)
-  if (urls.length === 0) {
-    throw new Error(t('pages.models.validation.baseUrlRequired'))
-  }
-
-  const isGoogleApi = apiType === 'google-generative-ai'
-  let lastError: string | null = null
-  for (const url of urls) {
-    try {
-      const requestUrl = isGoogleApi ? appendApiKeyToUrl(url, apiKey) : url
-      const headers: Record<string, string> = {}
-      if (isGoogleApi) {
-        // Google 探测仅用 query key，尽量避免浏览器预检导致的 CORS 失败
-        headers.Accept = 'application/json'
-      } else {
-        headers.Authorization = `Bearer ${apiKey}`
-      }
-
-      const response = await fetch(requestUrl, {
-        method: 'GET',
-        headers,
-      })
-
-      if (!response.ok) {
-        lastError = `${requestUrl} -> HTTP ${response.status}`
-        continue
-      }
-
-      const payload = (await response.json()) as unknown
-      const modelIds = parseModelIdsFromPayload(payload)
-      if (modelIds.length > 0) {
-        return modelIds
-      }
-      lastError = t('pages.models.probe.noModelsParsed', { url: requestUrl })
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      if (isGoogleApi && /failed to fetch/i.test(reason)) {
-        lastError = t('pages.models.probe.fetchFailedCors', { url })
-      } else {
-        lastError = t('pages.models.probe.fetchFailed', { url, reason })
-      }
-    }
-  }
-
-  throw new Error(lastError || t('pages.models.probe.failed'))
-}
-
-async function probeModelsFromGateway(providerId: string): Promise<string[]> {
-  const runtimeModels = await wsStore.rpc.listModels()
-  const ids = new Set<string>()
-
-  for (const item of runtimeModels) {
-    const rowProvider = (item.provider || '').trim()
-    const rowId = (item.id || '').trim()
-    if (!rowId) continue
-
-    const matchesProvider = rowProvider === providerId || rowId.startsWith(`${providerId}/`)
-    if (!matchesProvider) continue
-
-    const normalized = rowId.startsWith(`${providerId}/`)
-      ? rowId.slice(providerId.length + 1).trim()
-      : rowId
-    if (normalized) {
-      ids.add(normalized)
-    }
-  }
-
-  return Array.from(ids)
-}
-
-async function handleProbeModels() {
-  const baseUrl = providerForm.baseUrl.trim()
-  const apiType = providerForm.api || 'openai-completions'
-  const providerId = currentEditingProviderId.value
-  const inputApiKey = providerForm.apiKey.trim()
-  const existingProviderKey = readProviderApiKeyForProbe(providerMap.value[currentEditingProviderId.value])
-  const apiKey = inputApiKey || existingProviderKey
-  if (!baseUrl) {
-    message.warning(t('pages.models.validation.baseUrlRequired'))
-    return
-  }
-  if (!apiKey) {
-    if (selectedProviderHasKey.value) {
-      message.warning(t('pages.models.messages.apiKeyNotReadableForProbe'))
-    } else {
-      message.warning(t('pages.models.validation.apiKeyRequired'))
-    }
-    return
-  }
-
-  probing.value = true
-  probeError.value = ''
-  try {
-    const modelIds = await probeModelsFromProvider(baseUrl, apiKey, apiType)
-    providerForm.modelIdsText = modelIds.join('\n')
-    editActiveTab.value = 'models'
-    message.success(t('pages.models.messages.modelsProbed', { count: modelIds.length }))
-  } catch (error) {
-    const errorText = error instanceof Error ? error.message : String(error)
-    if (providerId) {
-      try {
-        const runtimeModelIds = await probeModelsFromGateway(providerId)
-        if (runtimeModelIds.length > 0) {
-          providerForm.modelIdsText = runtimeModelIds.join('\n')
-          editActiveTab.value = 'models'
-          message.success(t('pages.models.messages.modelsProbedFromGateway', { count: runtimeModelIds.length }))
-          return
-        }
-      } catch {
-        // ignore, fallback to original error below
-      }
-    }
-    probeError.value = errorText
-    message.error(t('pages.models.messages.modelProbeFailed'))
-  } finally {
-    probing.value = false
   }
 }
 
@@ -1721,7 +1659,7 @@ async function handleSaveProvider(confirmed = false) {
   const modelIds = parseModelIds(providerForm.modelIdsText)
   const existingProvider = providerMap.value[providerId]
   const existingModelIds = readProviderModelIds(existingProvider)
-  const finalModelIds = modelIds.length > 0 ? modelIds : existingModelIds
+  const finalModelIds = pickSingleProviderModelIds(modelIds.length > 0 ? modelIds : existingModelIds)
   const maskedKey = /^[*•]+$/.test(apiKey)
   const shouldPatchApiKey = !!apiKey && !maskedKey
 
@@ -1757,6 +1695,7 @@ async function handleSaveProvider(confirmed = false) {
   const providerPrefix = providerPathPrefixMap.value[providerId] || 'models.providers'
   const providerBasePath = `models.providers.${providerId}`
   const shouldMigrateLegacyProviderPath = providerPrefix === 'models'
+
   const modelsValue = finalModelIds.map((id) => ({ id, name: id, input: [...inputTypes] }))
   const patches: ConfigPatch[] = [
     { path: 'models.mode', value: 'merge' },
@@ -1781,6 +1720,11 @@ async function handleSaveProvider(confirmed = false) {
     patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
   }
 
+  const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
+  patches.push(
+    ...buildAgentModelReferenceSyncPatches(providerId, finalModelIds, defaultsCatalogSnapshot.catalog)
+  )
+
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
   if (!currentPrimary) {
     const inferredPrimary = `${providerId}/${finalModelIds[0]}`
@@ -1788,8 +1732,10 @@ async function handleSaveProvider(confirmed = false) {
   }
 
   try {
-    await configStore.patchConfig(patches)
+    const finalPatches = dedupeConfigPatchesByPath(patches)
+    await configStore.patchConfig(finalPatches)
     showSaveConfirmModal.value = false
+    showEditProviderModal.value = false
     selectedProviderId.value = providerId
     providerForm.id = providerId
     providerForm.apiKey = ''
@@ -1801,41 +1747,12 @@ async function handleSaveProvider(confirmed = false) {
   }
 }
 
-async function handleProbeCreateProviderModels() {
-  const baseUrl = createProviderForm.baseUrl.trim()
-  const apiType = createProviderForm.api || 'openai-completions'
-  const apiKey = createProviderForm.apiKey.trim()
-  if (!baseUrl) {
-    message.warning(t('pages.models.validation.baseUrlRequired'))
-    return
-  }
-  if (!apiKey) {
-    message.warning(t('pages.models.validation.apiKeyRequired'))
-    return
-  }
-
-  probingCreateProvider.value = true
-  createProbeError.value = ''
-  try {
-    const modelIds = await probeModelsFromProvider(baseUrl, apiKey, apiType)
-    createProviderForm.modelIdsText = modelIds.join('\n')
-    createActiveTab.value = 'models'
-    message.success(t('pages.models.messages.modelsProbed', { count: modelIds.length }))
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    createProbeError.value = reason
-    message.error(t('pages.models.messages.modelProbeFailed'))
-  } finally {
-    probingCreateProvider.value = false
-  }
-}
-
 async function handleCreateProvider(confirmed = false) {
   const providerId = normalizeProviderId(createProviderForm.id)
   const baseUrl = createProviderForm.baseUrl.trim()
   const apiKey = createProviderForm.apiKey.trim()
   const inputTypes = createCurrentModelInputTypes.value
-  const modelIds = parseModelIds(createProviderForm.modelIdsText)
+  const modelIds = pickSingleProviderModelIds(parseModelIds(createProviderForm.modelIdsText))
 
   if (!providerId) {
     message.warning(t('pages.models.validation.providerIdRequired'))
@@ -1902,6 +1819,68 @@ async function handleCreateProvider(confirmed = false) {
   }
 }
 
+async function handleQuickProviderSetup(key: QuickProviderKey) {
+  const preset = QUICK_PROVIDER_PRESETS[key]
+  const apiKey = quickProviderApiKeys[key].trim()
+  if (!apiKey) {
+    message.warning(t('pages.models.quick.messages.keyRequired'))
+    return
+  }
+
+  quickProviderSaving[key] = true
+  try {
+    const providerId = normalizeProviderId(preset.providerId)
+    const providerPath = `models.providers.${providerId}`
+    const modelIds = [preset.modelId]
+
+    const patches: ConfigPatch[] = [
+      { path: 'models.mode', value: 'merge' },
+      { path: `${providerPath}.api`, value: preset.api },
+      { path: `${providerPath}.baseUrl`, value: preset.baseUrl },
+      { path: `${providerPath}.apiKey`, value: apiKey },
+      {
+        path: `${providerPath}.models`,
+        value: modelIds.map((id) => ({ id, name: preset.modelName || id, input: [...preset.input] })),
+      },
+    ]
+
+    const providerPrefix = providerPathPrefixMap.value[providerId] || 'models.providers'
+    if (providerPrefix === 'models') {
+      patches.push({ path: `models.${providerId}`, value: null })
+    }
+
+    const mergedDefaultsModels = buildDefaultsModelsCatalogSyncedForProvider(providerId, modelIds, {
+      createWhenMissing: true,
+    })
+    if (mergedDefaultsModels) {
+      patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
+    }
+
+    const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
+    patches.push(
+      ...buildAgentModelReferenceSyncPatches(providerId, modelIds, defaultsCatalogSnapshot.catalog)
+    )
+
+    const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
+    if (!currentPrimary) {
+      patches.push({ path: 'agents.defaults.model.primary', value: `${providerId}/${preset.modelId}` })
+    }
+
+    const finalPatches = dedupeConfigPatchesByPath(patches)
+    await configStore.patchConfig(finalPatches)
+    quickProviderApiKeys[key] = ''
+    selectedProviderId.value = providerId
+    loadProviderForm(providerId)
+    message.success(t('pages.models.quick.messages.saved', {
+      provider: t(`pages.models.quick.providers.${key}.name`)
+    }))
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : t('common.saveFailed'))
+  } finally {
+    quickProviderSaving[key] = false
+  }
+}
+
 async function handleConfirmSave() {
   if (confirmActionType.value === 'edit') {
     await handleSaveProvider(true)
@@ -1962,8 +1941,11 @@ function handleCreateProviderClick() {
     </NCard>
 
     <NCard :title="t('pages.models.workbench.title')" class="models-workbench-card">
+      <NAlert type="warning" :bordered="false" style="margin-bottom: 12px;">
+        {{ t('pages.models.workbench.singleModelHint') }}
+      </NAlert>
       <NGrid cols="1 xl:12" responsive="screen" :x-gap="16" :y-gap="16">
-        <NGridItem class="models-workbench-item" span="1 xl:8">
+        <NGridItem class="models-workbench-item" span="1 xl:12">
           <div class="models-panel">
             <NSpace justify="space-between" align="center" :size="8" class="models-panel-toolbar">
               <NInput
@@ -2001,283 +1983,327 @@ function handleCreateProviderClick() {
             </NEmpty>
           </div>
         </NGridItem>
-
-        <NGridItem class="models-workbench-item" span="1 xl:4">
-          <div class="models-panel">
-            <div class="models-editor-header">
-              <NText strong>{{ providerEditorTitle }}</NText>
-              <NSpace v-if="selectedProviderSummary" :size="6" style="flex-wrap: wrap;">
-                <NTag size="small" :bordered="false">
-                  {{ t('pages.models.editor.modelsCount', { count: selectedProviderSummary.modelIds.length }) }}
-                </NTag>
-                <NTag
-                  v-for="source in selectedProviderSummary.sources"
-                  :key="source"
-                  size="small"
-                  :bordered="false"
-                  :type="sourceTagType(source)"
-                >
-                  {{ sourceLabel(source) }}
-                </NTag>
-              </NSpace>
-            </div>
-
-            <template v-if="editingExistingProvider">
-              <NTabs v-model:value="editActiveTab" type="line" animated>
-                <NTabPane name="basic" :tab="t('pages.models.tabs.basic')">
-                  <NForm label-placement="left" label-width="100">
-                    <NFormItem :label="t('pages.models.form.providerId')">
-                      <NInput
-                        v-model:value="providerForm.id"
-                        :disabled="true"
-                        :placeholder="t('pages.models.form.providerIdPlaceholder')"
-                      />
-                    </NFormItem>
-                    <NFormItem :label="t('pages.models.form.apiProtocol')">
-                      <NSelect v-model:value="providerForm.api" :options="apiOptions" />
-                    </NFormItem>
-                    <NFormItem :label="t('pages.models.form.baseUrl')">
-                      <NInput v-model:value="providerForm.baseUrl" :placeholder="t('pages.models.form.baseUrlPlaceholder')" />
-                    </NFormItem>
-                    <NFormItem :label="t('pages.models.form.apiKey')">
-                      <NSpace vertical :size="6" style="width: 100%;">
-                        <NInput
-                          v-model:value="providerForm.apiKey"
-                          type="password"
-                          show-password-on="click"
-                          :placeholder="apiKeyPlaceholder"
-                        />
-                        <NText depth="3" style="font-size: 12px;">
-                          {{ t('pages.models.form.apiKeyHint') }}
-                        </NText>
-                      </NSpace>
-                    </NFormItem>
-                    <NFormItem :label="t('pages.models.form.apiKeyStatus')">
-                      <NTag size="small" :bordered="false" :type="selectedProviderHasKey ? 'success' : 'default'">
-                        {{ selectedProviderHasKey ? t('pages.models.form.apiKeyStatusConfigured') : t('pages.models.form.apiKeyStatusNotConfigured') }}
-                      </NTag>
-                    </NFormItem>
-                    <NFormItem>
-                      <NSpace justify="end" style="width: 100%;">
-                        <NButton @click="editActiveTab = 'models'">{{ t('pages.models.actions.nextToModels') }}</NButton>
-                      </NSpace>
-                    </NFormItem>
-                  </NForm>
-                </NTabPane>
-
-                <NTabPane name="models" :tab="t('pages.models.tabs.models')">
-                  <NForm label-placement="left" label-width="100">
-                    <NFormItem :label="t('pages.models.form.modelInputTypes')">
-                      <NSelect
-                        v-model:value="providerForm.modelInputTypes"
-                        :options="modelInputTypeOptions"
-                        multiple
-                        :placeholder="t('pages.models.form.modelInputTypesPlaceholder')"
-                      />
-                    </NFormItem>
-                    <NFormItem :label="t('pages.models.form.models')">
-                      <NInput
-                        v-model:value="providerForm.modelIdsText"
-                        type="textarea"
-                        :autosize="{ minRows: 5, maxRows: 10 }"
-                        :placeholder="t('pages.models.form.modelsPlaceholder')"
-                      />
-                    </NFormItem>
-                    <NFormItem v-if="currentModelIds.length" :label="t('pages.models.form.detectedModels')">
-                      <NSpace :size="6" style="flex-wrap: wrap;">
-                        <NTag
-                          v-for="id in currentModelIds.slice(0, 20)"
-                          :key="id"
-                          size="small"
-                          :bordered="false"
-                        >
-                          {{ id }}
-                        </NTag>
-                        <NText depth="3" v-if="currentModelIds.length > 20">
-                          {{ t('pages.models.form.modelsCount', { count: currentModelIds.length }) }}
-                        </NText>
-                      </NSpace>
-                    </NFormItem>
-                    <NFormItem>
-                      <NSpace justify="space-between" style="width: 100%;">
-                        <NSpace>
-                          <NButton :loading="probing" @click="handleProbeModels">
-                            <template #icon><NIcon :component="SearchOutline" /></template>
-                            {{ t('pages.models.actions.probeModels') }}
-                          </NButton>
-                        </NSpace>
-                        <NSpace>
-                          <NButton @click="editActiveTab = 'basic'">{{ t('pages.models.actions.prev') }}</NButton>
-                          <NButton type="primary" @click="editActiveTab = 'preview'">{{ t('pages.models.actions.nextToPreview') }}</NButton>
-                        </NSpace>
-                      </NSpace>
-                    </NFormItem>
-                  </NForm>
-                  <NAlert v-if="probeError" type="error" :bordered="false" style="margin-top: 8px;">
-                    {{ probeError }}
-                  </NAlert>
-                </NTabPane>
-
-                <NTabPane name="preview" :tab="t('pages.models.tabs.preview')">
-                  <NSpace vertical :size="10">
-                    <div class="models-preview-grid">
-                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiDiff.changed }">
-                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.apiProtocol') }}</NText>
-                        <div class="models-preview-diff">
-                          <code>{{ editChangePreview?.apiDiff.before || '-' }}</code>
-                          <span class="models-preview-arrow">→</span>
-                          <code>{{ editChangePreview?.apiDiff.after || '-' }}</code>
-                        </div>
-                      </div>
-
-                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.baseUrlDiff.changed }">
-                        <NText depth="3" class="models-preview-label">Base URL</NText>
-                        <div class="models-preview-diff models-preview-diff--block">
-                          <code>{{ editChangePreview?.baseUrlDiff.before || '-' }}</code>
-                          <span class="models-preview-arrow">→</span>
-                          <code>{{ editChangePreview?.baseUrlDiff.after || '-' }}</code>
-                        </div>
-                      </div>
-
-                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.modelDiff.changed }">
-                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.models') }}</NText>
-                        <div class="models-preview-diff">
-                          <code>{{ editChangePreview?.modelDiff.beforeCount || 0 }}</code>
-                          <span class="models-preview-arrow">→</span>
-                          <code>{{ editChangePreview?.modelDiff.afterCount || 0 }}</code>
-                        </div>
-                      </div>
-
-                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.inputDiff.changed }">
-                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.inputTypes') }}</NText>
-                        <div class="models-preview-diff models-preview-diff--block">
-                          <code>{{ editChangePreview?.inputDiff.before.join(', ') || '-' }}</code>
-                          <span class="models-preview-arrow">→</span>
-                          <code>{{ editChangePreview?.inputDiff.after.join(', ') || '-' }}</code>
-                        </div>
-                      </div>
-
-                      <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiKeyAction === 'overwrite' }">
-                        <NText depth="3" class="models-preview-label">API Key</NText>
-                        <NTag
-                          size="small"
-                          :type="editChangePreview?.apiKeyAction === 'overwrite' ? 'warning' : 'default'"
-                          :bordered="false"
-                        >
-                          {{ editChangePreview?.apiKeyAction === 'overwrite'
-                            ? t('pages.models.preview.apiKeyOverwrite')
-                            : t('pages.models.preview.apiKeyKeep') }}
-                        </NTag>
-                      </div>
-
-                      <div class="models-preview-card" :class="{ 'is-changed': !!editChangePreview?.inferredPrimary }">
-                        <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.primaryModel') }}</NText>
-                        <NTag size="small" :type="editChangePreview?.inferredPrimary ? 'warning' : 'default'" :bordered="false">
-                          {{ editChangePreview?.inferredPrimary || t('pages.models.preview.unchanged') }}
-                        </NTag>
-                      </div>
-                    </div>
-
-                    <NCollapse v-if="editChangePreview?.modelDiff.changed">
-                      <NCollapseItem
-                        :title="t('pages.models.preview.modelDiffTitle', {
-                          added: editChangePreview?.modelDiff.added.length || 0,
-                          removed: editChangePreview?.modelDiff.removed.length || 0,
-                        })"
-                        name="edit-model-diff"
-                      >
-                        <NSpace vertical :size="8">
-                          <div v-if="editChangePreview?.modelDiff.added.length">
-                            <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.addedModels') }}</NText>
-                            <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
-                              <NTag
-                                v-for="id in editChangePreview?.modelDiff.added"
-                                :key="`add-${id}`"
-                                type="success"
-                                size="small"
-                                :bordered="false"
-                              >
-                                + {{ id }}
-                              </NTag>
-                            </NSpace>
-                          </div>
-                          <div v-if="editChangePreview?.modelDiff.removed.length">
-                            <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.removedModels') }}</NText>
-                            <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
-                              <NTag
-                                v-for="id in editChangePreview?.modelDiff.removed"
-                                :key="`remove-${id}`"
-                                type="error"
-                                size="small"
-                                :bordered="false"
-                              >
-                                - {{ id }}
-                              </NTag>
-                            </NSpace>
-                          </div>
-                        </NSpace>
-                      </NCollapseItem>
-                    </NCollapse>
-
-                    <div class="models-preview-paths">
-                      <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.patchPaths') }}</NText>
-                      <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
-                        <NTag
-                          v-for="path in editChangePreview?.patchPaths || []"
-                          :key="`edit-path-${path}`"
-                          size="small"
-                          :bordered="false"
-                        >
-                          {{ path }}
-                        </NTag>
-                      </NSpace>
-                    </div>
-
-                    <NAlert v-if="editChangePreview?.warnings.length" type="warning" :bordered="false">
-                      <div v-for="(warning, index) in editChangePreview?.warnings" :key="index">
-                        {{ warning }}
-                      </div>
-                    </NAlert>
-
-                    <NAlert v-if="editChangePreview && !editChangePreview.hasChanges" type="info" :bordered="false">
-                      {{ t('pages.models.preview.noChangesHint') }}
-                    </NAlert>
-
-                    <NSpace justify="space-between">
-                      <NButton @click="editActiveTab = 'models'">{{ t('pages.models.actions.prev') }}</NButton>
-                      <NButton
-                        type="primary"
-                        :loading="configStore.saving"
-                        :disabled="!editChangePreview?.hasChanges"
-                        @click="handleSaveProviderClick"
-                      >
-                        <template #icon><NIcon :component="SaveOutline" /></template>
-                        {{ providerSubmitLabel }}
-                      </NButton>
-                    </NSpace>
-                  </NSpace>
-                </NTabPane>
-              </NTabs>
-
-              <NCollapse v-if="selectedProviderRawText" style="margin-top: 12px;">
-                <NCollapseItem :title="t('pages.models.editor.rawConfigTitle')" name="provider-raw-json">
-                  <NCode :code="selectedProviderRawText" language="json" style="font-size: 12px;" />
-                </NCollapseItem>
-              </NCollapse>
-            </template>
-
-            <NEmpty v-else :description="t('pages.models.editor.empty')">
-              <template #extra>
-                <NButton size="small" type="primary" @click="handleNewProvider">
-                  <template #icon><NIcon :component="AddOutline" /></template>
-                  {{ t('pages.models.actions.createProvider') }}
-                </NButton>
-              </template>
-            </NEmpty>
-          </div>
-        </NGridItem>
       </NGrid>
     </NCard>
+
+    <NCard :title="t('pages.models.quick.title')" class="models-quick-card">
+      <NAlert type="info" :bordered="false" style="margin-bottom: 12px;">
+        {{ t('pages.models.quick.hint') }}
+      </NAlert>
+      <div class="models-quick-grid">
+        <div
+          v-for="item in quickProviderList"
+          :key="`quick-provider-${item.key}`"
+          class="models-quick-item"
+        >
+          <div class="models-quick-item-header">
+            <NText strong>{{ t(`pages.models.quick.providers.${item.key}.name`) }}</NText>
+            <NTag size="small" type="success" :bordered="false">
+              {{ t('pages.models.quick.latestTag') }}
+            </NTag>
+          </div>
+          <NSpace vertical :size="6">
+            <NText depth="3" class="models-quick-meta">
+              {{ t('pages.models.quick.providerId') }}：<code>{{ item.providerId }}</code>
+            </NText>
+            <NText depth="3" class="models-quick-meta">
+              {{ t('pages.models.quick.defaultModel') }}：<code>{{ item.modelId }}</code>
+            </NText>
+            <NText depth="3" class="models-quick-meta">
+              {{ t('pages.models.quick.endpoint') }}：<code>{{ item.baseUrl }}</code>
+            </NText>
+            <a
+              class="models-quick-doc-link"
+              :href="item.docsUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ t('pages.models.quick.docs') }}
+            </a>
+          </NSpace>
+          <NSpace vertical :size="8" style="margin-top: 10px;">
+            <NInput
+              v-model:value="quickProviderApiKeys[item.key]"
+              type="password"
+              show-password-on="click"
+              :placeholder="t('pages.models.quick.keyPlaceholder')"
+            />
+            <NButton
+              type="primary"
+              :loading="quickProviderSaving[item.key]"
+              @click="handleQuickProviderSetup(item.key)"
+            >
+              {{ t('pages.models.quick.action') }}
+            </NButton>
+          </NSpace>
+        </div>
+      </div>
+    </NCard>
+
+    <NModal
+      v-model:show="showEditProviderModal"
+      preset="card"
+      :title="providerEditorTitle"
+      style="max-width: 760px; width: 92vw;"
+      :mask-closable="false"
+    >
+      <template v-if="editingExistingProvider">
+        <NSpace vertical :size="12">
+          <NSpace v-if="selectedProviderSummary" :size="6" style="flex-wrap: wrap;">
+            <NTag size="small" :bordered="false">
+              {{ t('pages.models.editor.modelsCount', { count: selectedProviderSummary.modelIds.length }) }}
+            </NTag>
+          </NSpace>
+
+          <NTabs v-model:value="editActiveTab" type="line" animated>
+            <NTabPane name="basic" :tab="t('pages.models.tabs.basic')">
+              <NForm label-placement="left" label-width="100">
+                <NFormItem :label="t('pages.models.form.providerId')">
+                  <NInput
+                    v-model:value="providerForm.id"
+                    :disabled="true"
+                    :placeholder="t('pages.models.form.providerIdPlaceholder')"
+                  />
+                </NFormItem>
+                <NFormItem :label="t('pages.models.form.apiProtocol')">
+                  <NSelect v-model:value="providerForm.api" :options="apiOptions" />
+                </NFormItem>
+                <NFormItem :label="t('pages.models.form.baseUrl')">
+                  <NInput v-model:value="providerForm.baseUrl" :placeholder="t('pages.models.form.baseUrlPlaceholder')" />
+                </NFormItem>
+                <NFormItem :label="t('pages.models.form.apiKey')">
+                  <NSpace vertical :size="6" style="width: 100%;">
+                    <NInput
+                      v-model:value="providerForm.apiKey"
+                      type="password"
+                      show-password-on="click"
+                      :placeholder="apiKeyPlaceholder"
+                    />
+                    <NText depth="3" style="font-size: 12px;">
+                      {{ t('pages.models.form.apiKeyHint') }}
+                    </NText>
+                  </NSpace>
+                </NFormItem>
+                <NFormItem :label="t('pages.models.form.apiKeyStatus')">
+                  <NTag size="small" :bordered="false" :type="selectedProviderHasKey ? 'success' : 'default'">
+                    {{ selectedProviderHasKey ? t('pages.models.form.apiKeyStatusConfigured') : t('pages.models.form.apiKeyStatusNotConfigured') }}
+                  </NTag>
+                </NFormItem>
+                <NFormItem>
+                  <NSpace justify="end" style="width: 100%;">
+                    <NButton @click="editActiveTab = 'models'">{{ t('pages.models.actions.nextToModels') }}</NButton>
+                  </NSpace>
+                </NFormItem>
+              </NForm>
+            </NTabPane>
+
+            <NTabPane name="models" :tab="t('pages.models.tabs.models')">
+              <NForm label-placement="left" label-width="100">
+                <NFormItem :label="t('pages.models.form.modelInputTypes')">
+                  <NSelect
+                    v-model:value="providerForm.modelInputTypes"
+                    :options="modelInputTypeOptions"
+                    multiple
+                    :placeholder="t('pages.models.form.modelInputTypesPlaceholder')"
+                  />
+                </NFormItem>
+                <NFormItem :label="t('pages.models.form.models')">
+                  <NInput
+                    :value="providerForm.modelIdsText"
+                    :placeholder="t('pages.models.form.modelsPlaceholder')"
+                    @update:value="updateProviderSingleModelText"
+                  />
+                </NFormItem>
+                <NFormItem v-if="currentModelIds.length" :label="t('pages.models.form.detectedModels')">
+                  <NSpace :size="6" style="flex-wrap: wrap;">
+                    <NTag
+                      v-for="id in currentModelIds.slice(0, 20)"
+                      :key="id"
+                      size="small"
+                      :bordered="false"
+                    >
+                      {{ id }}
+                    </NTag>
+                    <NText depth="3" v-if="currentModelIds.length > 20">
+                      {{ t('pages.models.form.modelsCount', { count: currentModelIds.length }) }}
+                    </NText>
+                  </NSpace>
+                </NFormItem>
+                <NFormItem>
+                  <NSpace justify="end" style="width: 100%;">
+                    <NSpace>
+                      <NButton @click="editActiveTab = 'basic'">{{ t('pages.models.actions.prev') }}</NButton>
+                      <NButton type="primary" @click="editActiveTab = 'preview'">{{ t('pages.models.actions.nextToPreview') }}</NButton>
+                    </NSpace>
+                  </NSpace>
+                </NFormItem>
+              </NForm>
+            </NTabPane>
+
+            <NTabPane name="preview" :tab="t('pages.models.tabs.preview')">
+              <NSpace vertical :size="10">
+                <div class="models-preview-grid">
+                  <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiDiff.changed }">
+                    <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.apiProtocol') }}</NText>
+                    <div class="models-preview-diff">
+                      <code>{{ editChangePreview?.apiDiff.before || '-' }}</code>
+                      <span class="models-preview-arrow">→</span>
+                      <code>{{ editChangePreview?.apiDiff.after || '-' }}</code>
+                    </div>
+                  </div>
+
+                  <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.baseUrlDiff.changed }">
+                    <NText depth="3" class="models-preview-label">Base URL</NText>
+                    <div class="models-preview-diff models-preview-diff--block">
+                      <code>{{ editChangePreview?.baseUrlDiff.before || '-' }}</code>
+                      <span class="models-preview-arrow">→</span>
+                      <code>{{ editChangePreview?.baseUrlDiff.after || '-' }}</code>
+                    </div>
+                  </div>
+
+                  <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.modelDiff.changed }">
+                    <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.models') }}</NText>
+                    <div class="models-preview-diff">
+                      <code>{{ editChangePreview?.modelDiff.beforeCount || 0 }}</code>
+                      <span class="models-preview-arrow">→</span>
+                      <code>{{ editChangePreview?.modelDiff.afterCount || 0 }}</code>
+                    </div>
+                  </div>
+
+                  <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.inputDiff.changed }">
+                    <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.inputTypes') }}</NText>
+                    <div class="models-preview-diff models-preview-diff--block">
+                      <code>{{ editChangePreview?.inputDiff.before.join(', ') || '-' }}</code>
+                      <span class="models-preview-arrow">→</span>
+                      <code>{{ editChangePreview?.inputDiff.after.join(', ') || '-' }}</code>
+                    </div>
+                  </div>
+
+                  <div class="models-preview-card" :class="{ 'is-changed': editChangePreview?.apiKeyAction === 'overwrite' }">
+                    <NText depth="3" class="models-preview-label">API Key</NText>
+                    <NTag
+                      size="small"
+                      :type="editChangePreview?.apiKeyAction === 'overwrite' ? 'warning' : 'default'"
+                      :bordered="false"
+                    >
+                      {{ editChangePreview?.apiKeyAction === 'overwrite'
+                        ? t('pages.models.preview.apiKeyOverwrite')
+                        : t('pages.models.preview.apiKeyKeep') }}
+                    </NTag>
+                  </div>
+
+                  <div class="models-preview-card" :class="{ 'is-changed': !!editChangePreview?.inferredPrimary }">
+                    <NText depth="3" class="models-preview-label">{{ t('pages.models.preview.primaryModel') }}</NText>
+                    <NTag size="small" :type="editChangePreview?.inferredPrimary ? 'warning' : 'default'" :bordered="false">
+                      {{ editChangePreview?.inferredPrimary || t('pages.models.preview.unchanged') }}
+                    </NTag>
+                  </div>
+                </div>
+
+                <NCollapse v-if="editChangePreview?.modelDiff.changed">
+                  <NCollapseItem
+                    :title="t('pages.models.preview.modelDiffTitle', {
+                      added: editChangePreview?.modelDiff.added.length || 0,
+                      removed: editChangePreview?.modelDiff.removed.length || 0,
+                    })"
+                    name="edit-model-diff"
+                  >
+                    <NSpace vertical :size="8">
+                      <div v-if="editChangePreview?.modelDiff.added.length">
+                        <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.addedModels') }}</NText>
+                        <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
+                          <NTag
+                            v-for="id in editChangePreview?.modelDiff.added"
+                            :key="`add-${id}`"
+                            type="success"
+                            size="small"
+                            :bordered="false"
+                          >
+                            + {{ id }}
+                          </NTag>
+                        </NSpace>
+                      </div>
+                      <div v-if="editChangePreview?.modelDiff.removed.length">
+                        <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.removedModels') }}</NText>
+                        <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
+                          <NTag
+                            v-for="id in editChangePreview?.modelDiff.removed"
+                            :key="`remove-${id}`"
+                            type="error"
+                            size="small"
+                            :bordered="false"
+                          >
+                            - {{ id }}
+                          </NTag>
+                        </NSpace>
+                      </div>
+                    </NSpace>
+                  </NCollapseItem>
+                </NCollapse>
+
+                <div class="models-preview-paths">
+                  <NText depth="3" style="font-size: 12px;">{{ t('pages.models.preview.patchPaths') }}</NText>
+                  <NSpace :size="6" style="margin-top: 6px; flex-wrap: wrap;">
+                    <NTag
+                      v-for="path in editChangePreview?.patchPaths || []"
+                      :key="`edit-path-${path}`"
+                      size="small"
+                      :bordered="false"
+                    >
+                      {{ path }}
+                    </NTag>
+                  </NSpace>
+                </div>
+
+                <NAlert v-if="editChangePreview?.warnings.length" type="warning" :bordered="false">
+                  <div v-for="(warning, index) in editChangePreview?.warnings" :key="index">
+                    {{ warning }}
+                  </div>
+                </NAlert>
+
+                <NAlert v-if="editChangePreview && !editChangePreview.hasChanges" type="info" :bordered="false">
+                  {{ t('pages.models.preview.noChangesHint') }}
+                </NAlert>
+
+                <NSpace justify="space-between">
+                  <NButton @click="editActiveTab = 'models'">{{ t('pages.models.actions.prev') }}</NButton>
+                  <NButton
+                    type="primary"
+                    :loading="configStore.saving"
+                    :disabled="!editChangePreview?.hasChanges"
+                    @click="handleSaveProviderClick"
+                  >
+                    <template #icon><NIcon :component="SaveOutline" /></template>
+                    {{ providerSubmitLabel }}
+                  </NButton>
+                </NSpace>
+              </NSpace>
+            </NTabPane>
+          </NTabs>
+
+          <NCollapse v-if="selectedProviderRawText">
+            <NCollapseItem :title="t('pages.models.editor.rawConfigTitle')" name="provider-raw-json">
+              <NCode :code="selectedProviderRawText" language="json" style="font-size: 12px;" />
+            </NCollapseItem>
+          </NCollapse>
+        </NSpace>
+      </template>
+
+      <NEmpty v-else :description="t('pages.models.editor.empty')">
+        <template #extra>
+          <NButton size="small" type="primary" @click="handleNewProvider">
+            <template #icon><NIcon :component="AddOutline" /></template>
+            {{ t('pages.models.actions.createProvider') }}
+          </NButton>
+        </template>
+      </NEmpty>
+
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="handleCloseEditProviderModal">{{ t('common.cancel') }}</NButton>
+        </NSpace>
+      </template>
+    </NModal>
 
     <NModal
       v-model:show="showCreateProviderModal"
@@ -2330,10 +2356,9 @@ function handleCreateProviderClick() {
             </NFormItem>
             <NFormItem :label="t('pages.models.form.models')">
               <NInput
-                v-model:value="createProviderForm.modelIdsText"
-                type="textarea"
-                :autosize="{ minRows: 5, maxRows: 10 }"
+                :value="createProviderForm.modelIdsText"
                 :placeholder="t('pages.models.form.modelsPlaceholder')"
+                @update:value="updateCreateSingleModelText"
               />
             </NFormItem>
             <NFormItem v-if="createCurrentModelIds.length" :label="t('pages.models.form.detectedModels')">
@@ -2355,18 +2380,11 @@ function handleCreateProviderClick() {
               <NSpace justify="space-between" style="width: 100%;">
                 <NButton @click="createActiveTab = 'basic'">{{ t('pages.models.actions.prev') }}</NButton>
                 <NSpace>
-                  <NButton :loading="probingCreateProvider" @click="handleProbeCreateProviderModels">
-                    <template #icon><NIcon :component="SearchOutline" /></template>
-                    {{ t('pages.models.actions.probeModels') }}
-                  </NButton>
                   <NButton type="primary" @click="createActiveTab = 'preview'">{{ t('pages.models.actions.nextToPreview') }}</NButton>
                 </NSpace>
               </NSpace>
             </NFormItem>
           </NForm>
-          <NAlert v-if="createProbeError" type="error" :bordered="false" style="margin-top: 8px;">
-            {{ createProbeError }}
-          </NAlert>
         </NTabPane>
 
         <NTabPane name="preview" :tab="t('pages.models.tabs.preview')">
@@ -2638,33 +2656,6 @@ function handleCreateProviderClick() {
         </NSpace>
       </template>
     </NModal>
-
-    <NCard :title="t('pages.models.index.title')" class="models-index-card">
-      <NText depth="3" style="font-size: 12px;">
-        {{ t('pages.models.index.hint') }}
-      </NText>
-
-      <NDataTable
-        :columns="configuredModelColumns"
-        :data="configuredModelRows"
-        :loading="configStore.loading"
-        :bordered="false"
-        :pagination="{ pageSize: 12 }"
-        :row-key="(row: ConfiguredModelRow) => row.key"
-        striped
-        style="margin-top: 10px;"
-      />
-
-      <NEmpty
-        v-if="!configStore.loading && configuredModelRows.length === 0"
-        :description="t('pages.models.index.empty')"
-        class="models-empty"
-      >
-        <template #extra>
-          <NText depth="3">{{ t('pages.models.index.emptyHint') }}</NText>
-        </template>
-      </NEmpty>
-    </NCard>
   </div>
 </template>
 
@@ -2715,9 +2706,55 @@ function handleCreateProviderClick() {
   font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
-.models-workbench-card,
-.models-index-card {
+.models-workbench-card {
   border-radius: var(--radius-lg);
+}
+
+.models-quick-card {
+  border-radius: var(--radius-lg);
+}
+
+.models-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.models-quick-item {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+  background:
+    radial-gradient(circle at 88% 10%, rgba(24, 160, 88, 0.12), transparent 45%),
+    var(--bg-primary);
+}
+
+.models-quick-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.models-quick-meta {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.models-quick-meta code {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.models-quick-doc-link {
+  color: var(--primary-color);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.models-quick-doc-link:hover {
+  text-decoration: underline;
 }
 
 .models-workbench-item {
@@ -2739,6 +2776,30 @@ function handleCreateProviderClick() {
 .models-provider-table :deep(.n-data-table-th),
 .models-provider-table :deep(.n-data-table-td) {
   padding: 9px 10px;
+}
+
+.models-provider-actions {
+  align-items: center;
+}
+
+.models-action-btn {
+  min-width: 72px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.models-action-btn--active {
+  min-width: 82px;
+}
+
+.models-action-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
 }
 
 .models-panel-toolbar {
@@ -2818,6 +2879,10 @@ function handleCreateProviderClick() {
 }
 
 @media (max-width: 900px) {
+  .models-quick-grid {
+    grid-template-columns: 1fr;
+  }
+
   .models-panel-toolbar {
     flex-direction: column;
     align-items: stretch !important;
