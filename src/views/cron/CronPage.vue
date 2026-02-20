@@ -31,6 +31,7 @@ import {
   AddOutline,
   CalendarOutline,
   CheckmarkCircleOutline,
+  EyeOutline,
   PauseCircleOutline,
   PlayOutline,
   RefreshOutline,
@@ -87,6 +88,7 @@ const message = useMessage()
 const { t, locale } = useI18n()
 
 const showModal = ref(false)
+const showDetailModal = ref(false)
 const modalMode = ref<'create' | 'edit'>('create')
 const editingJobId = ref('')
 const searchQuery = ref('')
@@ -645,14 +647,35 @@ const jobColumns = computed<DataTableColumns<CronJob>>(() => [
   {
     title: t('pages.cron.table.jobs.actions'),
     key: 'actions',
-    width: 178,
+    width: 336,
     render(row) {
-      return h(NSpace, { size: 6 }, () => [
+      return h(NSpace, { size: 8, wrap: false, class: 'cron-job-actions' }, () => [
         h(
           NButton,
           {
-            size: 'tiny',
-            quaternary: true,
+            size: 'small',
+            type: 'info',
+            secondary: true,
+            strong: true,
+            class: 'cron-action-btn cron-action-btn--detail',
+            onClick: (e: MouseEvent) => {
+              e.stopPropagation()
+              openDetailModal(row)
+            },
+          },
+          {
+            icon: () => h(NIcon, { component: EyeOutline }),
+            default: () => t('pages.cron.actions.viewDetail'),
+          }
+        ),
+        h(
+          NButton,
+          {
+            size: 'small',
+            type: 'success',
+            secondary: true,
+            strong: true,
+            class: 'cron-action-btn cron-action-btn--run',
             onClick: (e: MouseEvent) => {
               e.stopPropagation()
               void handleRun(row)
@@ -666,8 +689,11 @@ const jobColumns = computed<DataTableColumns<CronJob>>(() => [
         h(
           NButton,
           {
-            size: 'tiny',
-            quaternary: true,
+            size: 'small',
+            type: 'info',
+            secondary: true,
+            strong: true,
+            class: 'cron-action-btn cron-action-btn--edit',
             onClick: (e: MouseEvent) => {
               e.stopPropagation()
               openEditModal(row)
@@ -690,9 +716,11 @@ const jobColumns = computed<DataTableColumns<CronJob>>(() => [
               h(
                 NButton,
                 {
-                  size: 'tiny',
-                  quaternary: true,
+                  size: 'small',
                   type: 'error',
+                  secondary: true,
+                  strong: true,
+                  class: 'cron-action-btn cron-action-btn--delete',
                   onClick: (e: MouseEvent) => e.stopPropagation(),
                 },
                 {
@@ -1373,6 +1401,18 @@ function openRunSession(run: CronRunLogEntry) {
   })
 }
 
+function openDetailModal(job: CronJob) {
+  showDetailModal.value = true
+  void handleSelectJob(job)
+}
+
+function openEditFromDetail() {
+  const job = selectedJob.value
+  if (!job) return
+  showDetailModal.value = false
+  openEditModal(job)
+}
+
 function jobRowClassName(row: CronJob): string {
   return row.id === cronStore.selectedJobId ? 'cron-row-selected' : ''
 }
@@ -1482,148 +1522,45 @@ function jobRowProps(row: CronJob) {
       </NGrid>
     </NCard>
 
-    <NGrid cols="1 l:11" responsive="screen" :x-gap="12" :y-gap="12">
-      <NGridItem class="cron-grid-item" span="1 l:7">
-        <NCard class="cron-card" :bordered="false">
-          <template #header>
-            <NSpace justify="space-between" align="center">
-              <NText strong>{{ t('pages.cron.jobs.title') }}</NText>
-              <NText depth="3" style="font-size: 12px;">
-                {{ t('pages.cron.jobs.count', { count: filteredJobs.length }) }}
-              </NText>
-            </NSpace>
-          </template>
+    <NCard class="cron-card" :bordered="false">
+      <template #header>
+        <NSpace justify="space-between" align="center">
+          <NText strong>{{ t('pages.cron.jobs.title') }}</NText>
+          <NText depth="3" style="font-size: 12px;">
+            {{ t('pages.cron.jobs.count', { count: filteredJobs.length }) }}
+          </NText>
+        </NSpace>
+      </template>
 
-          <div class="cron-filter-row">
-            <NInput v-model:value="searchQuery" clearable :placeholder="t('pages.cron.jobs.searchPlaceholder')">
-              <template #prefix><NIcon :component="SearchOutline" /></template>
-            </NInput>
-            <NRadioGroup v-model:value="statusFilter" size="small">
-              <NRadioButton value="all">{{ t('common.all') }}</NRadioButton>
-              <NRadioButton value="enabled">{{ t('common.enabled') }}</NRadioButton>
-              <NRadioButton value="disabled">{{ t('common.disabled') }}</NRadioButton>
-            </NRadioGroup>
-            <NButton size="small" @click="clearFilters">{{ t('common.clear') }}</NButton>
-          </div>
+      <div class="cron-filter-row">
+        <NInput v-model:value="searchQuery" clearable :placeholder="t('pages.cron.jobs.searchPlaceholder')">
+          <template #prefix><NIcon :component="SearchOutline" /></template>
+        </NInput>
+        <NRadioGroup v-model:value="statusFilter" size="small">
+          <NRadioButton value="all">{{ t('common.all') }}</NRadioButton>
+          <NRadioButton value="enabled">{{ t('common.enabled') }}</NRadioButton>
+          <NRadioButton value="disabled">{{ t('common.disabled') }}</NRadioButton>
+        </NRadioGroup>
+        <NButton size="small" @click="clearFilters">{{ t('common.clear') }}</NButton>
+      </div>
 
-          <NDataTable
-            class="cron-job-table"
-            :columns="jobColumns"
-            :data="filteredJobs"
-            :loading="cronStore.loading"
-            :bordered="false"
-            :pagination="{ pageSize: 8 }"
-            :row-key="(row: CronJob) => row.id"
-            :row-class-name="jobRowClassName"
-            :row-props="jobRowProps"
-            style="margin-top: 12px;"
-          />
+      <NDataTable
+        class="cron-job-table"
+        :columns="jobColumns"
+        :data="filteredJobs"
+        :loading="cronStore.loading"
+        :bordered="false"
+        :pagination="{ pageSize: 8 }"
+        :row-key="(row: CronJob) => row.id"
+        :row-class-name="jobRowClassName"
+        :row-props="jobRowProps"
+        style="margin-top: 12px;"
+      />
 
-          <NAlert v-if="!cronStore.loading && !hasJobs" type="default" :bordered="false" class="cron-empty-alert">
-            {{ t('pages.cron.jobs.emptyHint') }}
-          </NAlert>
-        </NCard>
-      </NGridItem>
-
-      <NGridItem class="cron-grid-item" span="1 l:4">
-        <NCard class="cron-card cron-detail-card" :bordered="false">
-          <template v-if="selectedJob">
-            <NSpace justify="space-between" align="center">
-              <NText strong>{{ selectedJob.name }}</NText>
-              <NSpace :size="6">
-                <NTag :type="selectedJob.enabled ? 'success' : 'default'" size="small" :bordered="false" round>
-                  {{ selectedJob.enabled ? t('pages.cron.jobStatus.enabled') : t('pages.cron.jobStatus.disabled') }}
-                </NTag>
-                <NTag v-if="selectedJob.state?.lastStatus" size="small" :bordered="false" round>
-                  {{ selectedJob.state?.lastStatus }}
-                </NTag>
-              </NSpace>
-            </NSpace>
-
-            <NText depth="3" class="cron-detail-desc">{{ selectedJob.description || t('common.noDescription') }}</NText>
-
-            <NGrid cols="1 s:2" responsive="screen" :x-gap="10" :y-gap="10" class="cron-detail-grid">
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.schedule') }}</NText>
-                <div class="cron-detail-value">{{ resolveScheduleText(selectedJob) }}</div>
-              </NGridItem>
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.execMode') }}</NText>
-                <div class="cron-detail-value">{{ selectedJob.sessionTarget || '-' }} / {{ selectedJob.wakeMode || '-' }}</div>
-              </NGridItem>
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.payloadKind') }}</NText>
-                <div class="cron-detail-value">{{ selectedJob.payload?.kind || '-' }}</div>
-              </NGridItem>
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.model') }}</NText>
-                <div class="cron-detail-value">{{ selectedJobModelText }}</div>
-              </NGridItem>
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.agent') }}</NText>
-                <div class="cron-detail-value">{{ selectedJob.agentId || t('pages.cron.defaultAgent') }}</div>
-              </NGridItem>
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.nextRun') }}</NText>
-                <div class="cron-detail-value">{{ nextRunText(selectedJob) }}</div>
-              </NGridItem>
-              <NGridItem>
-                <NText depth="3">{{ t('pages.cron.detail.lastRun') }}</NText>
-                <div class="cron-detail-value">{{ lastRunText(selectedJob) }}</div>
-              </NGridItem>
-            </NGrid>
-
-            <NDivider style="margin: 14px 0 10px;" />
-
-            <NText depth="3">{{ t('pages.cron.detail.payload') }}</NText>
-            <div
-              v-if="selectedJobPayloadHtml"
-              class="cron-detail-value cron-detail-block cron-markdown"
-              v-html="selectedJobPayloadHtml"
-            ></div>
-            <div v-else class="cron-detail-value cron-detail-block">-</div>
-
-            <div v-if="selectedJob.delivery" class="cron-delivery-block">
-              <NText depth="3">{{ t('pages.cron.detail.delivery') }}</NText>
-              <div class="cron-detail-value cron-detail-block">
-                {{ selectedJob.delivery.mode }}
-                <span v-if="selectedJob.delivery.channel"> / {{ selectedJob.delivery.channel }}</span>
-                <span v-if="selectedJob.delivery.to"> / {{ selectedJob.delivery.to }}</span>
-              </div>
-            </div>
-
-            <NAlert
-              v-if="selectedJob.state?.lastError"
-              type="error"
-              :show-icon="true"
-              :bordered="false"
-              class="cron-error-alert"
-            >
-              {{ t('pages.cron.detail.lastError', { error: selectedJob.state?.lastError }) }}
-            </NAlert>
-
-            <NSpace class="cron-detail-actions" wrap>
-              <NButton size="small" type="primary" @click="handleRun(selectedJob)">
-                <template #icon><NIcon :component="PlayOutline" /></template>
-                {{ t('pages.cron.actions.runNow') }}
-              </NButton>
-              <NButton size="small" @click="openEditModal(selectedJob)">
-                <template #icon><NIcon :component="CreateOutline" /></template>
-                {{ t('pages.cron.actions.editJob') }}
-              </NButton>
-              <NButton size="small" @click="cronStore.fetchRuns(selectedJob.id)">
-                <template #icon><NIcon :component="RefreshOutline" /></template>
-                {{ t('pages.cron.actions.refreshRuns') }}
-              </NButton>
-            </NSpace>
-          </template>
-
-          <div v-else class="cron-empty-state">
-            {{ t('pages.cron.detail.emptyHint') }}
-          </div>
-        </NCard>
-      </NGridItem>
-    </NGrid>
+      <NAlert v-if="!cronStore.loading && !hasJobs" type="default" :bordered="false" class="cron-empty-alert">
+        {{ t('pages.cron.jobs.emptyHint') }}
+      </NAlert>
+    </NCard>
 
     <NCard class="cron-card" :bordered="false">
       <template #header>
@@ -1647,6 +1584,118 @@ function jobRowProps(row: CronJob) {
         :scroll-x="760"
       />
     </NCard>
+
+    <NModal
+      v-model:show="showDetailModal"
+      preset="card"
+      :title="t('pages.cron.modal.detailTitle')"
+      style="width: 980px; max-width: calc(100vw - 28px);"
+    >
+      <template v-if="selectedJob">
+        <div class="cron-detail-modal-shell">
+          <section class="cron-detail-hero-card">
+            <div class="cron-detail-hero-head">
+              <div style="min-width: 0;">
+                <NText strong class="cron-detail-hero-title">{{ selectedJob.name }}</NText>
+                <NText depth="3" class="cron-detail-desc">{{ selectedJob.description || t('common.noDescription') }}</NText>
+              </div>
+              <NSpace :size="6" wrap>
+                <NTag :type="selectedJob.enabled ? 'success' : 'default'" size="small" :bordered="false" round>
+                  {{ selectedJob.enabled ? t('pages.cron.jobStatus.enabled') : t('pages.cron.jobStatus.disabled') }}
+                </NTag>
+                <NTag v-if="selectedJob.state?.lastStatus" size="small" :bordered="false" round>
+                  {{ selectedJob.state?.lastStatus }}
+                </NTag>
+              </NSpace>
+            </div>
+
+            <div class="cron-detail-kpi-grid">
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.schedule') }}</NText>
+                <div class="cron-detail-value">{{ resolveScheduleText(selectedJob) }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.execMode') }}</NText>
+                <div class="cron-detail-value">{{ selectedJob.sessionTarget || '-' }} / {{ selectedJob.wakeMode || '-' }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.payloadKind') }}</NText>
+                <div class="cron-detail-value">{{ selectedJob.payload?.kind || '-' }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.model') }}</NText>
+                <div class="cron-detail-value">{{ selectedJobModelText }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.agent') }}</NText>
+                <div class="cron-detail-value">{{ selectedJob.agentId || t('pages.cron.defaultAgent') }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.nextRun') }}</NText>
+                <div class="cron-detail-value">{{ nextRunText(selectedJob) }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.detail.lastRun') }}</NText>
+                <div class="cron-detail-value">{{ lastRunText(selectedJob) }}</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="cron-detail-panel-card">
+            <NText depth="3">{{ t('pages.cron.detail.payload') }}</NText>
+            <div
+              v-if="selectedJobPayloadHtml"
+              class="cron-detail-value cron-detail-block cron-markdown"
+              v-html="selectedJobPayloadHtml"
+            ></div>
+            <div v-else class="cron-detail-value cron-detail-block">-</div>
+          </section>
+
+          <section v-if="selectedJob.delivery" class="cron-detail-panel-card">
+            <NText depth="3">{{ t('pages.cron.detail.delivery') }}</NText>
+            <div class="cron-detail-value cron-detail-block">
+              {{ selectedJob.delivery.mode }}
+              <span v-if="selectedJob.delivery.channel"> / {{ selectedJob.delivery.channel }}</span>
+              <span v-if="selectedJob.delivery.to"> / {{ selectedJob.delivery.to }}</span>
+            </div>
+          </section>
+
+          <NAlert
+            v-if="selectedJob.state?.lastError"
+            type="error"
+            :show-icon="true"
+            :bordered="false"
+            class="cron-error-alert"
+          >
+            {{ t('pages.cron.detail.lastError', { error: selectedJob.state?.lastError }) }}
+          </NAlert>
+        </div>
+      </template>
+
+      <div v-else class="cron-empty-state">
+        {{ t('pages.cron.detail.emptyHint') }}
+      </div>
+
+      <template #footer>
+        <NSpace justify="space-between" align="center" wrap>
+          <NSpace :size="8" wrap>
+            <NButton size="small" type="primary" :disabled="!selectedJob" @click="selectedJob && handleRun(selectedJob)">
+              <template #icon><NIcon :component="PlayOutline" /></template>
+              {{ t('pages.cron.actions.runNow') }}
+            </NButton>
+            <NButton size="small" :disabled="!selectedJob" @click="openEditFromDetail">
+              <template #icon><NIcon :component="CreateOutline" /></template>
+              {{ t('pages.cron.actions.editJob') }}
+            </NButton>
+            <NButton size="small" :disabled="!selectedJob" @click="selectedJob && cronStore.fetchRuns(selectedJob.id)">
+              <template #icon><NIcon :component="RefreshOutline" /></template>
+              {{ t('pages.cron.actions.refreshRuns') }}
+            </NButton>
+          </NSpace>
+          <NButton @click="showDetailModal = false">{{ t('common.cancel') }}</NButton>
+        </NSpace>
+      </template>
+    </NModal>
 
     <NModal
       v-model:show="showModal"
@@ -1974,16 +2023,8 @@ function jobRowProps(row: CronJob) {
   line-height: 1.5;
 }
 
-.cron-grid-item {
-  min-width: 0;
-}
-
 .cron-card {
   border-radius: var(--radius-lg);
-}
-
-.cron-detail-card {
-  min-height: 440px;
 }
 
 .cron-filter-row {
@@ -1997,13 +2038,79 @@ function jobRowProps(row: CronJob) {
   margin-top: 10px;
 }
 
-.cron-detail-desc {
-  display: block;
-  margin-top: 8px;
+.cron-job-actions {
+  align-items: center;
+  flex-wrap: nowrap;
 }
 
-.cron-detail-grid {
+.cron-action-btn {
+  min-width: 72px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.cron-action-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
+}
+
+.cron-detail-modal-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cron-detail-hero-card {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px;
+  background:
+    radial-gradient(circle at 92% 10%, rgba(24, 160, 88, 0.16), transparent 42%),
+    linear-gradient(130deg, var(--bg-card), rgba(32, 128, 240, 0.05));
+}
+
+.cron-detail-hero-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cron-detail-hero-title {
+  display: block;
+  font-size: 18px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.cron-detail-desc {
+  display: block;
+  margin-top: 7px;
+}
+
+.cron-detail-kpi-grid {
   margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.cron-detail-kpi-card,
+.cron-detail-panel-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--bg-primary);
+}
+
+.cron-detail-panel-card {
+  padding: 10px 11px;
 }
 
 .cron-detail-value {
@@ -2014,10 +2121,6 @@ function jobRowProps(row: CronJob) {
 
 .cron-detail-block {
   margin-top: 6px;
-}
-
-.cron-delivery-block {
-  margin-top: 10px;
 }
 
 .cron-markdown {
@@ -2087,10 +2190,6 @@ function jobRowProps(row: CronJob) {
 
 .cron-error-alert {
   margin-top: 12px;
-}
-
-.cron-detail-actions {
-  margin-top: 14px;
 }
 
 .cron-empty-state {

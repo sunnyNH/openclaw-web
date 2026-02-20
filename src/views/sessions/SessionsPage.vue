@@ -18,7 +18,6 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
-  AddOutline,
   ChatbubblesOutline,
   RefreshOutline,
   SearchOutline,
@@ -189,13 +188,13 @@ const sessionColumns = computed<DataTableColumns<SessionRow>>(() => ([
               NButton,
               {
                 size: 'small',
-                type: 'info',
+                type: 'success',
                 secondary: true,
                 strong: true,
                 class: 'sessions-action-btn sessions-action-btn--new',
               },
               {
-                icon: () => h(NIcon, { component: AddOutline }),
+                icon: () => h(NIcon, { component: RefreshOutline }),
                 default: () => t('pages.sessions.list.newAction'),
               }
             ),
@@ -410,10 +409,11 @@ async function handleDelete(session: SessionRow) {
 
 .sessions-row-actions {
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 .sessions-action-btn {
-  min-width: 72px;
+  min-width: 78px;
   height: 34px;
   padding: 0 12px;
   border-radius: 9px;

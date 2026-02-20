@@ -510,6 +510,7 @@ export default {
       },
       actions: {
         createJob: 'Create job',
+        viewDetail: 'Details',
         run: 'Run',
         runNow: 'Run now',
         edit: 'Edit',
@@ -522,6 +523,7 @@ export default {
       modal: {
         createTitle: 'Create job',
         editTitle: 'Edit job',
+        detailTitle: 'Job details',
         footerHint: 'Jobs are written to Gateway cron storage and scheduled by the Gateway process.',
         sections: {
           basic: 'Basic',
@@ -1186,7 +1188,7 @@ export default {
         },
         activeTime: 'Last active: {time}',
         viewDetail: 'View detail',
-        newAction: 'new',
+        newAction: 'New',
         confirmNew: 'Start a new run for this session?',
         newSuccess: 'New session started',
         newFailed: 'Failed to start a new session',

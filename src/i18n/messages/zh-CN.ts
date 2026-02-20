@@ -510,6 +510,7 @@ export default {
       },
       actions: {
         createJob: '新建任务',
+        viewDetail: '详情',
         run: '运行',
         runNow: '立即运行',
         edit: '编辑',
@@ -522,6 +523,7 @@ export default {
       modal: {
         createTitle: '新建任务',
         editTitle: '编辑任务',
+        detailTitle: '任务详情',
         footerHint: '任务将写入 Gateway 的 cron 存储，并由网关进程调度执行。',
         sections: {
           basic: '基础信息',
@@ -1186,7 +1188,7 @@ export default {
         },
         activeTime: '活动时间：{time}',
         viewDetail: '查看详情',
-        newAction: 'new',
+        newAction: 'New',
         confirmNew: '确认为该会话启动新会话？',
         newSuccess: '已启动新会话',
         newFailed: '启动新会话失败',

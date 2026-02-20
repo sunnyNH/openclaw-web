@@ -27,7 +27,7 @@ import {
   NText,
   useMessage,
 } from 'naive-ui'
-import { AddOutline, RefreshOutline, SaveOutline } from '@vicons/ionicons5'
+import { AddOutline, CheckmarkCircleOutline, CreateOutline, RefreshOutline, SaveOutline, TrashOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '@/stores/config'
 import type { DataTableColumns } from 'naive-ui'
@@ -929,79 +929,90 @@ const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
   {
     title: t('pages.models.table.providers.actions'),
     key: 'actions',
-    width: 272,
+    width: 332,
     render(row) {
       const isPrimaryProvider = row.id === currentPrimaryProviderId.value
       const isManagedProvider = managedProviderIdSet.value.has(row.id)
-      return h(
-        NSpace,
-        { size: 8, wrap: false, class: 'models-provider-actions' },
-        () => [
-          ...(isManagedProvider
-            ? [
-                h(
-                  NButton,
-                  {
-                    size: 'small',
-                    type: 'info',
-                    secondary: true,
-                    strong: true,
-                    class: 'models-action-btn models-action-btn--edit',
-                    onClick: () => handleLoadProvider(row.id)
-                  },
-                  { default: () => t('common.edit') }
-                ),
-              ]
-            : []),
-          h(
-            NButton,
-            {
-              size: 'small',
-              type: isPrimaryProvider ? 'default' : 'success',
-              secondary: true,
-              strong: true,
-              class: isPrimaryProvider
-                ? 'models-action-btn models-action-btn--active'
-                : 'models-action-btn models-action-btn--primary',
-              disabled: isPrimaryProvider,
-              onClick: () => handleUseProviderAsPrimary(row.id, row.modelIds),
-            },
-            { default: () => (isPrimaryProvider ? t('pages.models.default.active') : t('pages.models.default.set')) }
-          ),
-          ...(isManagedProvider
-            ? [
-                h(
-                  NPopconfirm,
-                  {
-                    onPositiveClick: () => handleDeleteProvider(row.id),
-                    positiveText: t('common.delete'),
-                    negativeText: t('common.cancel'),
-                  },
-                  {
-                    trigger: () =>
-                      h(
-                        NButton,
-                        {
-                          size: 'small',
-                          type: 'error',
-                          secondary: true,
-                          strong: true,
-                          class: 'models-action-btn models-action-btn--delete',
-                          disabled: isPrimaryProvider,
-                          onClick: (e: MouseEvent) => e.stopPropagation(),
-                        },
-                        { default: () => t('common.delete') }
-                      ),
-                    default: () =>
-                      isPrimaryProvider
-                        ? t('pages.models.confirm.deleteDefaultProviderBlocked')
-                        : t('pages.models.confirm.deleteProvider', { id: row.id }),
-                  }
-                ),
-              ]
-            : []),
-        ]
-      )
+      return h('div', { class: 'models-provider-actions-wrap' }, [
+        h(
+          NSpace,
+          { size: 8, wrap: false, class: 'models-provider-actions' },
+          () => [
+            ...(isManagedProvider
+              ? [
+                  h(
+                    NButton,
+                    {
+                      size: 'small',
+                      type: 'info',
+                      secondary: true,
+                      strong: true,
+                      class: 'models-action-btn models-action-btn--edit',
+                      onClick: () => handleLoadProvider(row.id)
+                    },
+                    {
+                      icon: () => h(NIcon, { component: CreateOutline }),
+                      default: () => t('common.edit'),
+                    }
+                  ),
+                ]
+              : []),
+            h(
+              NButton,
+              {
+                size: 'small',
+                type: isPrimaryProvider ? 'default' : 'success',
+                secondary: true,
+                strong: true,
+                class: isPrimaryProvider
+                  ? 'models-action-btn models-action-btn--active'
+                  : 'models-action-btn models-action-btn--primary',
+                disabled: isPrimaryProvider,
+                onClick: () => handleUseProviderAsPrimary(row.id, row.modelIds),
+              },
+              {
+                icon: () => h(NIcon, { component: CheckmarkCircleOutline }),
+                default: () => (isPrimaryProvider ? t('pages.models.default.active') : t('pages.models.default.set')),
+              }
+            ),
+            ...(isManagedProvider
+              ? [
+                  h(
+                    NPopconfirm,
+                    {
+                      onPositiveClick: () => handleDeleteProvider(row.id),
+                      positiveText: t('common.delete'),
+                      negativeText: t('common.cancel'),
+                    },
+                    {
+                      trigger: () =>
+                        h(
+                          NButton,
+                          {
+                            size: 'small',
+                            type: 'error',
+                            secondary: true,
+                            strong: true,
+                            class: 'models-action-btn models-action-btn--delete',
+                            disabled: isPrimaryProvider,
+                            onClick: (e: MouseEvent) => e.stopPropagation(),
+                          },
+                          {
+                            icon: () => h(NIcon, { component: TrashOutline }),
+                            default: () => t('common.delete'),
+                          }
+                        ),
+                      default: () =>
+                        isPrimaryProvider
+                          ? t('pages.models.confirm.deleteDefaultProviderBlocked')
+                          : t('pages.models.confirm.deleteProvider', { id: row.id }),
+                    }
+                  ),
+                ]
+              : []),
+          ]
+        ),
+      ])
     },
   },
 ])
@@ -2863,8 +2874,15 @@ function handleCreateProviderClick() {
   padding: 9px 10px;
 }
 
+.models-provider-actions-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .models-provider-actions {
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 .models-action-btn {
