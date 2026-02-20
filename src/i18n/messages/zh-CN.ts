@@ -1170,6 +1170,7 @@ export default {
           session: '会话',
           messageCount: '消息数',
           model: '模型',
+          tokenTotal: 'Token 总量',
           lastActivity: '最近活动',
           actions: '操作',
         },

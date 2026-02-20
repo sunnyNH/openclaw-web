@@ -10,7 +10,18 @@ export const useSessionStore = defineStore('session', () => {
 
   const wsStore = useWebSocketStore()
 
-  function mergeMessageCountsFromUsage(baseSessions: Session[], usage: unknown): Session[] {
+  function parseUsageNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.max(0, Math.floor(value))
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed))
+    }
+    return undefined
+  }
+
+  function mergeUsageIntoSessions(baseSessions: Session[], usage: unknown): Session[] {
     if (!Array.isArray(baseSessions) || baseSessions.length === 0) return baseSessions
     if (!usage || typeof usage !== 'object') return baseSessions
 
@@ -18,40 +29,89 @@ export const useSessionStore = defineStore('session', () => {
     const usageList = Array.isArray(usageRow.sessions) ? usageRow.sessions : []
     if (usageList.length === 0) return baseSessions
 
-    const usageCountMap = new Map<string, number>()
+    const usageMap = new Map<
+      string,
+      {
+        messageCount?: number
+        input?: number
+        output?: number
+        totalTokens?: number
+      }
+    >()
+
     for (const item of usageList) {
       if (!item || typeof item !== 'object') continue
       const row = item as {
         key?: unknown
-        usage?: { messageCounts?: { total?: unknown } }
+        sessionKey?: unknown
+        id?: unknown
+        usage?: {
+          input?: unknown
+          output?: unknown
+          totalTokens?: unknown
+          tokens?: unknown
+          total?: unknown
+          messageCounts?: { total?: unknown }
+        }
       }
-      const key = typeof row.key === 'string' ? row.key.trim() : ''
+      const keyCandidate = row.key ?? row.sessionKey ?? row.id
+      const key = typeof keyCandidate === 'string' ? keyCandidate.trim() : ''
       if (!key) continue
 
-      const totalRaw = row.usage?.messageCounts?.total
-      let total = 0
-      if (typeof totalRaw === 'number' && Number.isFinite(totalRaw)) {
-        total = Math.max(0, Math.floor(totalRaw))
-      } else if (typeof totalRaw === 'string' && totalRaw.trim()) {
-        const parsed = Number(totalRaw)
-        total = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0
-      }
-
-      if (total > 0) {
-        usageCountMap.set(key, total)
-      }
+      const usageData = row.usage || {}
+      usageMap.set(key, {
+        messageCount: parseUsageNumber(usageData.messageCounts?.total),
+        input: parseUsageNumber(usageData.input),
+        output: parseUsageNumber(usageData.output),
+        totalTokens: parseUsageNumber(usageData.totalTokens ?? usageData.tokens ?? usageData.total),
+      })
     }
 
-    if (usageCountMap.size === 0) return baseSessions
+    if (usageMap.size === 0) return baseSessions
 
     return baseSessions.map((session) => {
-      const usageCount = usageCountMap.get(session.key)
-      if (usageCount === undefined || usageCount <= 0) return session
-      if (session.messageCount >= usageCount) return session
-      return {
-        ...session,
-        messageCount: usageCount,
+      const usageData = usageMap.get(session.key)
+      if (!usageData) return session
+
+      let changed = false
+      const next: Session = { ...session }
+
+      if (usageData.messageCount !== undefined && usageData.messageCount > session.messageCount) {
+        next.messageCount = usageData.messageCount
+        changed = true
       }
+
+      const hasTokenData =
+        usageData.input !== undefined ||
+        usageData.output !== undefined ||
+        usageData.totalTokens !== undefined
+
+      if (hasTokenData) {
+        const currentUsage = session.tokenUsage
+        let totalInput = usageData.input ?? currentUsage?.totalInput
+        let totalOutput = usageData.output ?? currentUsage?.totalOutput
+
+        if (totalInput === undefined && totalOutput === undefined && usageData.totalTokens !== undefined) {
+          totalInput = usageData.totalTokens
+          totalOutput = 0
+        }
+
+        if (totalInput !== undefined || totalOutput !== undefined) {
+          const normalizedInput = Math.max(0, Math.floor(totalInput ?? 0))
+          const normalizedOutput = Math.max(0, Math.floor(totalOutput ?? 0))
+          const currentInput = currentUsage?.totalInput ?? -1
+          const currentOutput = currentUsage?.totalOutput ?? -1
+          if (normalizedInput !== currentInput || normalizedOutput !== currentOutput) {
+            next.tokenUsage = {
+              totalInput: normalizedInput,
+              totalOutput: normalizedOutput,
+            }
+            changed = true
+          }
+        }
+      }
+
+      return changed ? next : session
     })
   }
 
@@ -59,8 +119,14 @@ export const useSessionStore = defineStore('session', () => {
     loading.value = true
     try {
       const list = await wsStore.rpc.listSessions()
+      if (list.length === 0) {
+        sessions.value = list
+        return
+      }
+
       const hasMessageCount = list.some((item) => item.messageCount > 0)
-      if (hasMessageCount || list.length === 0) {
+      const hasMissingTokenUsage = list.some((item) => !item.tokenUsage)
+      if (hasMessageCount && !hasMissingTokenUsage) {
         sessions.value = list
         return
       }
@@ -69,7 +135,7 @@ export const useSessionStore = defineStore('session', () => {
         const usage = await wsStore.rpc.getSessionsUsage({
           limit: Math.max(200, list.length * 4),
         })
-        sessions.value = mergeMessageCountsFromUsage(list, usage)
+        sessions.value = mergeUsageIntoSessions(list, usage)
       } catch {
         sessions.value = list
       }

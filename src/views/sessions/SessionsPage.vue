@@ -166,6 +166,16 @@ const sessionColumns = computed<DataTableColumns<SessionRow>>(() => ([
     },
   },
   {
+    title: t('pages.sessions.list.columns.tokenTotal'),
+    key: 'tokenTotal',
+    width: 120,
+    render(row) {
+      const total = resolveSessionTokenTotal(row)
+      if (total === null) return '-'
+      return formatTokenTotalK(total)
+    },
+  },
+  {
     title: t('pages.sessions.list.columns.lastActivity'),
     key: 'lastActivity',
     width: 150,
@@ -240,6 +250,21 @@ function parseTimestamp(value?: string): number {
 function isActiveIn24h(timestamp: number): boolean {
   if (!timestamp) return false
   return Date.now() - timestamp <= 24 * 60 * 60 * 1000
+}
+
+function resolveSessionTokenTotal(session: Session): number | null {
+  const usage = session.tokenUsage
+  if (!usage) return null
+  const input = Number.isFinite(usage.totalInput) ? usage.totalInput : 0
+  const output = Number.isFinite(usage.totalOutput) ? usage.totalOutput : 0
+  return Math.max(0, Math.floor(input + output))
+}
+
+function formatTokenTotalK(total: number): string {
+  const value = Math.max(0, total) / 1000
+  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2
+  const text = value.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1')
+  return `${text}K`
 }
 
 function clearFilters() {
@@ -357,7 +382,7 @@ async function handleDelete(session: SessionRow) {
         :bordered="false"
         :row-key="(row: SessionRow) => row.key"
         :pagination="{ pageSize: 12 }"
-        :scroll-x="980"
+        :scroll-x="1110"
         striped
       />
     </NCard>

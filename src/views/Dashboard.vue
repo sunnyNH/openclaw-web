@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NAlert,
   NButton,
   NCard,
-  NDataTable,
   NGrid,
   NGridItem,
   NIcon,
-  NInput,
   NSpace,
   NSpin,
   NTag,
@@ -27,21 +25,16 @@ import {
 import { useI18n } from 'vue-i18n'
 import StatCard from '@/components/common/StatCard.vue'
 import { useWebSocketStore } from '@/stores/websocket'
-import { formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
+import { formatRelativeTime } from '@/utils/format'
 import type {
-  AgentEvent,
   CostUsageSummary,
   CronJob,
   ModelInfo,
   OpenClawConfig,
-  Session,
   SessionsUsageResult,
-  SessionsUsageSession,
   SessionsUsageTotals,
   Skill,
 } from '@/api/types'
-
-const EVENT_LIMIT = 40
 
 type RangePreset = 'today' | '7d' | '30d' | 'custom'
 type UsageMode = 'tokens' | 'cost'
@@ -53,8 +46,6 @@ const loading = ref(true)
 const refreshing = ref(false)
 const usageError = ref<string | null>(null)
 const lastUpdatedAt = ref<number | null>(null)
-const eventKeyword = ref('')
-const activeSessionKey = ref('')
 const rangePreset = ref<RangePreset>('7d')
 const usageMode = ref<UsageMode>('tokens')
 const usageStartDate = ref('')
@@ -67,12 +58,9 @@ const stats = ref({
   installedSkills: 0,
 })
 
-const recentSessions = ref<Session[]>([])
-const recentEvents = ref<AgentEvent[]>([])
 const sessionsUsageResult = ref<SessionsUsageResult | null>(null)
 const usageCostSummary = ref<CostUsageSummary | null>(null)
 
-let cleanupEvents: (() => void) | null = null
 let cleanupStateChange: (() => void) | null = null
 let retryAfterFirstConnect = false
 
@@ -115,14 +103,6 @@ const usageTotals = computed(() =>
 )
 
 const usageSessions = computed(() => sessionsUsageResult.value?.sessions || [])
-
-const usageSessionMap = computed(() => {
-  const map: Record<string, SessionsUsageSession> = {}
-  for (const item of usageSessions.value) {
-    map[item.key] = item
-  }
-  return map
-})
 
 const usageCoverageText = computed(() => {
   const total = usageSessions.value.length
@@ -438,86 +418,6 @@ const topToolMax = computed(() =>
   Math.max(...topTools.value.map((item) => item.count || 0), 0)
 )
 
-const filteredEvents = computed(() => {
-  const keyword = eventKeyword.value.trim().toLowerCase()
-  if (!keyword) return recentEvents.value
-  return recentEvents.value.filter((event) => event.event.toLowerCase().includes(keyword))
-})
-
-const eventStats = computed(() => {
-  const result = {
-    chat: 0,
-    agent: 0,
-    tool: 0,
-    system: 0,
-  }
-
-  for (const item of recentEvents.value) {
-    const name = item.event.toLowerCase()
-    if (name.startsWith('chat')) result.chat += 1
-    else if (name.startsWith('agent')) result.agent += 1
-    else if (name.startsWith('tool')) result.tool += 1
-    else result.system += 1
-  }
-
-  return result
-})
-
-const activeSession = computed(() =>
-  recentSessions.value.find((session) => session.key === activeSessionKey.value) || null
-)
-
-const activeSessionUsage = computed(() => {
-  if (!activeSession.value) return null
-  return usageSessionMap.value[activeSession.value.key]?.usage || null
-})
-
-const sessionColumns = computed(() => ([
-  {
-    title: t('pages.dashboard.sessions.columns.channel'),
-    key: 'channel',
-    width: 100,
-    render(row: Session) {
-      const parsed = parseSessionKey(row.key)
-      return h(NTag, { size: 'small', round: true, bordered: false }, { default: () => parsed.channel })
-    },
-  },
-  {
-    title: t('pages.dashboard.sessions.columns.peer'),
-    key: 'peer',
-    ellipsis: { tooltip: true },
-    render(row: Session) {
-      const parsed = parseSessionKey(row.key)
-      return parsed.peer || '-'
-    },
-  },
-  {
-    title: t('pages.dashboard.sessions.columns.messages'),
-    key: 'messageCount',
-    width: 84,
-  },
-  {
-    title: t('pages.dashboard.sessions.columns.usage'),
-    key: 'usage',
-    width: 116,
-    render(row: Session) {
-      const usage = usageSessionMap.value[row.key]?.usage
-      if (!usage) return '-'
-      return usageMode.value === 'tokens'
-        ? formatCompactNumber(usage.totalTokens)
-        : formatUsd(usage.totalCost)
-    },
-  },
-  {
-    title: t('pages.dashboard.sessions.columns.lastActivity'),
-    key: 'lastActivity',
-    width: 132,
-    render(row: Session) {
-      return row.lastActivity ? formatRelativeTime(row.lastActivity) : '-'
-    },
-  },
-]))
-
 onMounted(async () => {
   applyRangePreset('7d', false)
   retryAfterFirstConnect = wsStore.state !== 'connected'
@@ -527,26 +427,11 @@ onMounted(async () => {
   })
   await refreshDashboard()
   maybeRetryAfterConnect()
-
-  cleanupEvents = wsStore.subscribe('event', (evt: unknown) => {
-    const event = evt as { event: string; payload: unknown; seq?: number }
-    recentEvents.value.unshift({
-      event: event.event,
-      payload: event.payload,
-      seq: event.seq,
-      timestamp: Date.now(),
-    })
-    if (recentEvents.value.length > EVENT_LIMIT) {
-      recentEvents.value.length = EVENT_LIMIT
-    }
-  })
 })
 
 onUnmounted(() => {
   cleanupStateChange?.()
   cleanupStateChange = null
-  cleanupEvents?.()
-  cleanupEvents = null
 })
 
 function maybeRetryAfterConnect() {
@@ -587,20 +472,11 @@ async function refreshDashboard() {
     const modelList = modelsRes.status === 'fulfilled' ? modelsRes.value : []
     const skillList = skillsRes.status === 'fulfilled' ? skillsRes.value : []
     const config = configRes.status === 'fulfilled' ? configRes.value : null
-    const sortedSessions = [...sessionList].sort(
-      (a, b) => parseTime(b.lastActivity) - parseTime(a.lastActivity)
-    )
-
     stats.value = {
       sessionCount: sessionList.length,
       cronCount: cronList.filter((job: CronJob) => job.enabled).length,
       modelCount: resolveConfiguredModelCount(config, modelList),
       installedSkills: skillList.filter((s: Skill) => s.installed).length,
-    }
-
-    recentSessions.value = sortedSessions.slice(0, 12)
-    if (!activeSessionKey.value || !recentSessions.value.some((item) => item.key === activeSessionKey.value)) {
-      activeSessionKey.value = recentSessions.value[0]?.key || ''
     }
 
     if (usageRes.status === 'fulfilled') {
@@ -804,12 +680,6 @@ function resolveConfiguredModelCount(config: OpenClawConfig | null, fallbackMode
   return fallbackIds.size
 }
 
-function parseTime(value?: string): number {
-  if (!value) return 0
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? timestamp : 0
-}
-
 function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(locale.value, {
     notation: 'compact',
@@ -826,17 +696,6 @@ function formatUsd(value: number): string {
   }).format(value)
 }
 
-function formatEventPayload(payload: unknown): string {
-  if (payload === null || payload === undefined) return '-'
-  if (typeof payload === 'string') return truncate(payload.replace(/\s+/g, ' '), 100)
-  if (typeof payload === 'number' || typeof payload === 'boolean') return String(payload)
-  try {
-    return truncate(JSON.stringify(payload), 120)
-  } catch {
-    return t('pages.dashboard.events.payloadUnserializable')
-  }
-}
-
 function formatUsageValue(value: number): string {
   return usageMode.value === 'tokens' ? formatCompactNumber(value) : formatUsd(value)
 }
@@ -848,27 +707,6 @@ function usageMetric(totals: SessionsUsageTotals): number {
 function topBarWidth(value: number, max: number): string {
   if (max <= 0 || value <= 0) return '0%'
   return `${Math.max((value / max) * 100, 8)}%`
-}
-
-function sessionRowProps(row: Session) {
-  return {
-    onClick: () => {
-      activeSessionKey.value = row.key
-    },
-    style: 'cursor: pointer;',
-  }
-}
-
-function sessionRowClassName(row: Session) {
-  return row.key === activeSessionKey.value ? 'dashboard-row-active' : ''
-}
-
-function viewSessions() {
-  router.push({ name: 'Sessions' })
-}
-
-function viewSessionDetail(session: Session) {
-  router.push({ name: 'SessionDetail', params: { key: encodeURIComponent(session.key) } })
 }
 
 function viewChat() {
@@ -1158,98 +996,6 @@ function viewModels() {
         </NGrid>
       </NCard>
 
-      <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
-        <NGridItem :span="2">
-          <NCard :title="t('pages.dashboard.cards.sessions')" class="dashboard-card">
-            <template #header-extra>
-              <NButton text @click="viewSessions">{{ t('common.viewAll') }}</NButton>
-            </template>
-
-            <NDataTable
-              :columns="sessionColumns"
-              :data="recentSessions"
-              :bordered="false"
-              size="small"
-              :pagination="false"
-              :row-key="(row: Session) => row.key"
-              :row-props="sessionRowProps"
-              :row-class-name="sessionRowClassName"
-            />
-
-            <div v-if="activeSession" class="dashboard-session-focus">
-              <NSpace justify="space-between" align="center">
-                <div>
-                  <NText strong>{{ activeSession.key }}</NText>
-                  <NText depth="3" style="display: block; margin-top: 4px;">
-                    {{
-                      t('pages.dashboard.sessions.summary', {
-                        model: activeSession.model || '-',
-                        messages: activeSession.messageCount,
-                        last: activeSession.lastActivity ? formatRelativeTime(activeSession.lastActivity) : '-',
-                      })
-                    }}
-                  </NText>
-                </div>
-                <div style="text-align: right;">
-                  <NText depth="3" style="display: block;">
-                    {{ t('pages.dashboard.sessions.usageLabel', { mode: usageMode === 'tokens' ? t('pages.dashboard.usageMode.tokensShort') : t('pages.dashboard.usageMode.costShort') }) }}
-                  </NText>
-                  <NText strong>
-                    {{
-                      activeSessionUsage
-                        ? usageMode === 'tokens'
-                          ? formatCompactNumber(activeSessionUsage.totalTokens)
-                          : formatUsd(activeSessionUsage.totalCost)
-                        : '-'
-                    }}
-                  </NText>
-                </div>
-              </NSpace>
-              <NSpace justify="end" style="margin-top: 8px;">
-                <NButton size="small" tertiary type="primary" @click="viewSessionDetail(activeSession)">
-                  {{ t('pages.sessions.detail.title') }}
-                </NButton>
-              </NSpace>
-            </div>
-          </NCard>
-        </NGridItem>
-
-        <NGridItem :span="1">
-          <NCard :title="t('pages.dashboard.cards.events')" class="dashboard-card">
-            <template #header-extra>
-              <NInput
-                v-model:value="eventKeyword"
-                size="small"
-                clearable
-                :placeholder="t('pages.dashboard.events.placeholder')"
-                style="width: 260px;"
-              />
-            </template>
-
-            <NSpace :size="8" wrap style="margin-bottom: 10px;">
-              <NTag size="small" round :bordered="false">chat {{ eventStats.chat }}</NTag>
-              <NTag size="small" round :bordered="false">agent {{ eventStats.agent }}</NTag>
-              <NTag size="small" round :bordered="false">tool {{ eventStats.tool }}</NTag>
-              <NTag size="small" round :bordered="false">system {{ eventStats.system }}</NTag>
-            </NSpace>
-
-            <div class="event-list">
-              <div v-for="(event, index) in filteredEvents" :key="`${event.event}-${event.seq || index}`" class="event-row">
-                <NSpace justify="space-between" align="center">
-                  <NTag size="tiny" :bordered="false" round>{{ event.event }}</NTag>
-                  <NText depth="3" style="font-size: 12px;">
-                    {{ formatRelativeTime(event.timestamp) }}
-                  </NText>
-                </NSpace>
-                <NText depth="3" style="display: block; margin-top: 4px; font-size: 12px;">
-                  {{ formatEventPayload(event.payload) }}
-                </NText>
-              </div>
-              <div v-if="filteredEvents.length === 0" class="event-empty">{{ t('pages.dashboard.events.empty') }}</div>
-            </div>
-          </NCard>
-        </NGridItem>
-      </NGrid>
     </div>
   </NSpin>
 </template>
@@ -1312,14 +1058,6 @@ function viewModels() {
 .usage-date-sep {
   font-size: 12px;
   color: var(--text-secondary);
-}
-
-.dashboard-session-focus {
-  margin-top: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 10px;
-  background: var(--bg-secondary);
 }
 
 .usage-trend-item,
@@ -1561,34 +1299,6 @@ function viewModels() {
 .top-empty {
   font-size: 12px;
   color: var(--text-secondary);
-}
-
-.event-list {
-  max-height: 320px;
-  overflow-y: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: var(--bg-primary);
-}
-
-.event-row {
-  padding: 10px 0;
-  border-bottom: 1px dashed var(--border-color);
-}
-
-.event-row:last-child {
-  border-bottom: none;
-}
-
-.event-empty {
-  text-align: center;
-  padding: 32px 0;
-  color: var(--text-secondary);
-}
-
-:deep(.dashboard-row-active td) {
-  background: rgba(24, 160, 88, 0.12) !important;
 }
 
 @media (max-width: 900px) {

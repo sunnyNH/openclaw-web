@@ -1170,6 +1170,7 @@ export default {
           session: 'Session',
           messageCount: 'Messages',
           model: 'Model',
+          tokenTotal: 'Token total',
           lastActivity: 'Last active',
           actions: 'Actions',
         },
