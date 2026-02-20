@@ -81,12 +81,29 @@ const quickReplies = ref<Array<{
   updatedAt: number
 }>>([])
 
-const sessionOptions = computed(() =>
-  sessionStore.sessions.map((session) => ({
-    label: session.key,
-    value: session.key,
-  }))
-)
+const sessionOptions = computed(() => {
+  const seen = new Set<string>()
+  const options = sessionStore.sessions
+    .map((session) => session.key.trim())
+    .filter((key) => {
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .map((key) => ({
+      label: key,
+      value: key,
+    }))
+
+  if (!seen.has('main')) {
+    options.unshift({
+      label: 'main',
+      value: 'main',
+    })
+  }
+
+  return options
+})
 
 const normalizedSessionKey = computed(() => sessionKeyInput.value.trim() || 'main')
 const selectedSession = computed(() =>
@@ -1058,8 +1075,8 @@ function normalizeSessionSelectValue(value: string | number | null | undefined):
 }
 
 function handleSessionKeyChange(value: string | number | null) {
-  const key = normalizeSessionSelectValue(value)
-  if (!key) return
+  const key = normalizeSessionSelectValue(value) || 'main'
+  sessionKeyInput.value = key
   void loadHistoryForKey(key, { force: true })
 }
 
