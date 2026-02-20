@@ -502,6 +502,19 @@ const providerMap = computed<Record<string, ModelProviderConfig>>(() => {
   return map
 })
 
+const quickProviderConfiguredMap = computed<Record<QuickProviderKey, boolean>>(() => {
+  const next = {} as Record<QuickProviderKey, boolean>
+  for (const item of quickProviderList) {
+    const provider = providerMap.value[item.providerId]
+    if (!provider) {
+      next[item.key] = false
+      continue
+    }
+    next[item.key] = readProviderModelIds(provider).length > 0
+  }
+  return next
+})
+
 const providerPathPrefixMap = computed<Record<string, 'models.providers' | 'models'>>(() => {
   const map: Record<string, 'models.providers' | 'models'> = {}
   for (const entry of providerEntries.value) {
@@ -1261,19 +1274,19 @@ function buildDefaultsModelsCatalogWithoutProvider(providerId: string): Record<s
   const existing = existingSnapshot.catalog
   if (!existing) return null
 
-  const next: Record<string, unknown> = {}
-  let changed = existingSnapshot.normalized
+  const patch: Record<string, unknown> = {}
+  let changed = false
 
-  for (const [modelRef, entry] of Object.entries(existing)) {
+  for (const modelRef of Object.keys(existing)) {
     if (isModelRefFromProvider(modelRef, providerId)) {
+      // JSON Merge Patch: null means remove this key from agents.defaults.models.
+      patch[modelRef] = null
       changed = true
-      continue
     }
-    next[modelRef] = entry
   }
 
   if (!changed) return null
-  return Object.keys(next).length > 0 ? next : null
+  return patch
 }
 
 function buildDefaultsModelsCatalogSyncedForProvider(
@@ -1288,39 +1301,48 @@ function buildDefaultsModelsCatalogSyncedForProvider(
   const incomingEntries = buildAllowlistEntriesFromProvider(providerId, modelIds)
   const incomingEntryMap = new Map(incomingEntries.map((entry) => [entry.modelRef, entry]))
 
-  const base = existing ? { ...existing } : buildBootstrapDefaultsModelsCatalog()
-  const next: Record<string, unknown> = {}
-  let changed = existingSnapshot.normalized || (!existing && Object.keys(base).length > 0)
+  const patch: Record<string, unknown> = {}
+  let changed = false
 
-  for (const [modelRef, entry] of Object.entries(base)) {
-    if (!isModelRefFromProvider(modelRef, providerId)) {
-      next[modelRef] = entry
-      continue
-    }
+  if (existing) {
+    for (const [modelRef, entry] of Object.entries(existing)) {
+      if (!isModelRefFromProvider(modelRef, providerId)) continue
 
-    const incoming = incomingEntryMap.get(modelRef)
-    if (!incoming) {
-      changed = true
-      continue
-    }
+      const incoming = incomingEntryMap.get(modelRef)
+      if (!incoming) {
+        // JSON Merge Patch: null means remove outdated provider model ref.
+        patch[modelRef] = null
+        changed = true
+        continue
+      }
 
-    const normalizedEntry = normalizeDefaultsModelCatalogEntry(entry, incoming.alias)
-    next[modelRef] = normalizedEntry
-    incomingEntryMap.delete(modelRef)
-    if (!isJsonValueEqual(entry ?? {}, normalizedEntry)) {
-      changed = true
+      const normalizedEntry = normalizeDefaultsModelCatalogEntry(entry, incoming.alias)
+      if (!isJsonValueEqual(entry ?? {}, normalizedEntry)) {
+        patch[modelRef] = normalizedEntry
+        changed = true
+      }
+      incomingEntryMap.delete(modelRef)
     }
   }
 
-  for (const entry of incomingEntryMap.values()) {
-    next[entry.modelRef] = {
-      alias: entry.alias.trim() || entry.modelRef,
+  for (const incoming of incomingEntryMap.values()) {
+    patch[incoming.modelRef] = {
+      alias: incoming.alias.trim() || incoming.modelRef,
     }
     changed = true
   }
 
+  if (!changed && !existing && options?.createWhenMissing) {
+    for (const entry of incomingEntries) {
+      patch[entry.modelRef] = {
+        alias: entry.alias.trim() || entry.modelRef,
+      }
+    }
+    changed = Object.keys(patch).length > 0
+  }
+
   if (!changed) return null
-  return Object.keys(next).length > 0 ? next : null
+  return patch
 }
 
 function filterModelRefArrayByProviderSync(
@@ -1498,6 +1520,46 @@ function buildAgentModelReferenceSyncPatches(
   return patches
 }
 
+function buildLegacyModelsReferenceSyncPatches(
+  providerId: string,
+  modelIds: string[],
+  defaultsModelsCatalog: Record<string, unknown> | null
+): ConfigPatch[] {
+  const patches: ConfigPatch[] = []
+  const normalizedModelIds = normalizeUniqueIds(modelIds)
+  const replacementPrimary = normalizedModelIds[0] ? `${providerId}/${normalizedModelIds[0]}` : null
+  const allowedModelRefs = buildProviderModelRefSet(providerId, normalizedModelIds)
+
+  const models = asRecord(configStore.config?.models)
+  if (!models) return patches
+
+  const primaryModelRef = resolveModelRefFromConfigValue(models.primary, defaultsModelsCatalog)
+  if (
+    primaryModelRef &&
+    isModelRefFromProvider(primaryModelRef, providerId) &&
+    !allowedModelRefs.has(primaryModelRef)
+  ) {
+    patches.push({
+      path: 'models.primary',
+      value: replacementPrimary,
+    })
+  }
+
+  const fallback = filterModelRefArrayByProviderSync(models.fallback, {
+    providerId,
+    allowedModelRefs,
+    defaultsModelsCatalog,
+  })
+  if (fallback.changed) {
+    patches.push({
+      path: 'models.fallback',
+      value: fallback.value.length > 0 ? fallback.value : null,
+    })
+  }
+
+  return patches
+}
+
 function dedupeConfigPatchesByPath(patches: ConfigPatch[]): ConfigPatch[] {
   const map = new Map<string, ConfigPatch>()
   for (const patch of patches) {
@@ -1625,14 +1687,17 @@ async function handleDeleteProvider(providerIdInput: string): Promise<void> {
 
   const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
   const defaultsModelsPatch = buildDefaultsModelsCatalogWithoutProvider(providerId)
-  if (defaultsModelsPatch) {
+  const defaultsCatalogHasProviderRef = !!defaultsCatalogSnapshot.catalog
+    && Object.keys(defaultsCatalogSnapshot.catalog).some((modelRef) => isModelRefFromProvider(modelRef, providerId))
+  if (defaultsModelsPatch || defaultsCatalogHasProviderRef) {
     patches.push({
       path: 'agents.defaults.models',
-      value: defaultsModelsPatch,
+      value: defaultsModelsPatch ?? null,
     })
   }
   patches.push(
-    ...buildAgentModelReferenceSyncPatches(providerId, [], defaultsCatalogSnapshot.catalog)
+    ...buildAgentModelReferenceSyncPatches(providerId, [], defaultsCatalogSnapshot.catalog),
+    ...buildLegacyModelsReferenceSyncPatches(providerId, [], defaultsCatalogSnapshot.catalog),
   )
 
   const finalPatches = dedupeConfigPatchesByPath(patches)
@@ -1722,7 +1787,8 @@ async function handleSaveProvider(confirmed = false) {
 
   const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
   patches.push(
-    ...buildAgentModelReferenceSyncPatches(providerId, finalModelIds, defaultsCatalogSnapshot.catalog)
+    ...buildAgentModelReferenceSyncPatches(providerId, finalModelIds, defaultsCatalogSnapshot.catalog),
+    ...buildLegacyModelsReferenceSyncPatches(providerId, finalModelIds, defaultsCatalogSnapshot.catalog),
   )
 
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
@@ -1801,6 +1867,12 @@ async function handleCreateProvider(confirmed = false) {
     patches.push({ path: 'agents.defaults.models', value: mergedDefaultsModels })
   }
 
+  const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
+  patches.push(
+    ...buildAgentModelReferenceSyncPatches(providerId, modelIds, defaultsCatalogSnapshot.catalog),
+    ...buildLegacyModelsReferenceSyncPatches(providerId, modelIds, defaultsCatalogSnapshot.catalog),
+  )
+
   const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
   if (!currentPrimary) {
     const inferredPrimary = `${providerId}/${modelIds[0]}`
@@ -1808,7 +1880,8 @@ async function handleCreateProvider(confirmed = false) {
   }
 
   try {
-    await configStore.patchConfig(patches)
+    const finalPatches = dedupeConfigPatchesByPath(patches)
+    await configStore.patchConfig(finalPatches)
     showSaveConfirmModal.value = false
     showCreateProviderModal.value = false
     selectedProviderId.value = providerId
@@ -1820,6 +1893,9 @@ async function handleCreateProvider(confirmed = false) {
 }
 
 async function handleQuickProviderSetup(key: QuickProviderKey) {
+  if (quickProviderConfiguredMap.value[key]) {
+    return
+  }
   const preset = QUICK_PROVIDER_PRESETS[key]
   const apiKey = quickProviderApiKeys[key].trim()
   if (!apiKey) {
@@ -1858,7 +1934,8 @@ async function handleQuickProviderSetup(key: QuickProviderKey) {
 
     const defaultsCatalogSnapshot = readExistingDefaultsModelsCatalog()
     patches.push(
-      ...buildAgentModelReferenceSyncPatches(providerId, modelIds, defaultsCatalogSnapshot.catalog)
+      ...buildAgentModelReferenceSyncPatches(providerId, modelIds, defaultsCatalogSnapshot.catalog),
+      ...buildLegacyModelsReferenceSyncPatches(providerId, modelIds, defaultsCatalogSnapshot.catalog),
     )
 
     const currentPrimary = primaryModel.value.trim() || configStore.config?.agents?.defaults?.model?.primary || ''
@@ -1998,9 +2075,14 @@ function handleCreateProviderClick() {
         >
           <div class="models-quick-item-header">
             <NText strong>{{ t(`pages.models.quick.providers.${item.key}.name`) }}</NText>
-            <NTag size="small" type="success" :bordered="false">
-              {{ t('pages.models.quick.latestTag') }}
-            </NTag>
+            <NSpace :size="6" align="center">
+              <NTag v-if="quickProviderConfiguredMap[item.key]" size="small" type="primary" :bordered="false">
+                {{ t('pages.models.quick.configuredTag') }}
+              </NTag>
+              <NTag size="small" type="success" :bordered="false">
+                {{ t('pages.models.quick.latestTag') }}
+              </NTag>
+            </NSpace>
           </div>
           <NSpace vertical :size="6">
             <NText depth="3" class="models-quick-meta">
@@ -2031,9 +2113,12 @@ function handleCreateProviderClick() {
             <NButton
               type="primary"
               :loading="quickProviderSaving[item.key]"
+              :disabled="quickProviderConfiguredMap[item.key]"
               @click="handleQuickProviderSetup(item.key)"
             >
-              {{ t('pages.models.quick.action') }}
+              {{ quickProviderConfiguredMap[item.key]
+                ? t('pages.models.quick.configuredTag')
+                : t('pages.models.quick.action') }}
             </NButton>
           </NSpace>
         </div>

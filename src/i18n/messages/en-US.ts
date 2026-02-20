@@ -653,6 +653,7 @@ export default {
       quick: {
         title: 'Coding Quick Setup',
         hint: 'Enter only the API key to create/update provider. Default models are prefilled with the latest official coding models.',
+        configuredTag: 'Configured',
         latestTag: 'Latest default',
         providerId: 'Provider ID',
         defaultModel: 'Default model',

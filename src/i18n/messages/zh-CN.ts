@@ -653,6 +653,7 @@ export default {
       quick: {
         title: 'Coding 套餐快捷配置',
         hint: '输入 API Key 即可一键创建或更新渠道，默认模型使用官方最新 Coding 模型预置（后续可手动调整）。',
+        configuredTag: '已配置',
         latestTag: '最新默认',
         providerId: '渠道 ID',
         defaultModel: '默认模型',
