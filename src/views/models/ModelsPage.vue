@@ -929,14 +929,32 @@ const providerColumns = computed<DataTableColumns<ProviderSummary>>(() => [
   {
     title: t('pages.models.table.providers.actions'),
     key: 'actions',
-    width: 332,
+    width: 282,
+    align: 'right',
+    titleAlign: 'right',
     render(row) {
       const isPrimaryProvider = row.id === currentPrimaryProviderId.value
       const isManagedProvider = managedProviderIdSet.value.has(row.id)
-      return h('div', { class: 'models-provider-actions-wrap' }, [
+      return h('div', {
+        class: 'models-provider-actions-wrap',
+        style: {
+          width: '100%',
+          display: 'flex',
+          justifyContent: 'flex-end',
+        },
+      }, [
         h(
           NSpace,
-          { size: 8, wrap: false, class: 'models-provider-actions' },
+          {
+            size: 8,
+            wrap: false,
+            justify: 'end',
+            class: 'models-provider-actions',
+            style: {
+              width: '100%',
+              justifyContent: 'flex-end',
+            },
+          },
           () => [
             ...(isManagedProvider
               ? [
@@ -2877,12 +2895,13 @@ function handleCreateProviderClick() {
 .models-provider-actions-wrap {
   width: 100%;
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
 .models-provider-actions {
   align-items: center;
   flex-wrap: nowrap;
+  justify-content: flex-end;
 }
 
 .models-action-btn {

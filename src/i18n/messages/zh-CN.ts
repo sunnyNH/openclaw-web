@@ -449,6 +449,17 @@ export default {
         title: '运行历史',
         subtitle: '{name}（最近 {count} 条）',
         noSelection: '未选择任务',
+        detail: {
+          summary: '运行摘要',
+          jobId: '任务 ID',
+          runAt: '执行时间',
+          duration: '耗时',
+          nextRun: '下次执行',
+          session: '会话',
+          error: '错误信息',
+          raw: '原始数据',
+          empty: '未选择运行记录',
+        },
       },
       table: {
         jobs: {
@@ -524,6 +535,7 @@ export default {
         createTitle: '新建任务',
         editTitle: '编辑任务',
         detailTitle: '任务详情',
+        runDetailTitle: '运行详情',
         footerHint: '任务将写入 Gateway 的 cron 存储，并由网关进程调度执行。',
         sections: {
           basic: '基础信息',

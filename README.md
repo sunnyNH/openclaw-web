@@ -62,6 +62,8 @@ npm run dev
 
 默认地址：`http://localhost:3001`
 
+说明：这是前端开发服务器地址，不是 Gateway 连接地址。
+
 ### 4. 生产构建
 
 ```bash
@@ -98,7 +100,10 @@ npm run preview
 
 ## 与 OpenClaw Gateway 对接
 
-1. 登录页输入 Gateway WS 地址与 Token。
+1. 登录页输入 Gateway WS/WSS 地址与 Token。
+   - 本地（TLS）：`wss://localhost:18789`
+   - 远程（TLS）：`wss://<你的域名>`
+   - 本地（未启用 TLS 的默认开发环境）：`ws://127.0.0.1:18789`
 2. 应用通过统一 WebSocket RPC 客户端调用网关能力。
 3. 模型页以网关配置为准（优先读取 `models.providers.*`）。
 

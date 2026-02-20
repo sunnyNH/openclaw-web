@@ -449,6 +449,17 @@ export default {
         title: 'Runs',
         subtitle: '{name} · {count} runs',
         noSelection: 'Select a job to view run history',
+        detail: {
+          summary: 'Run summary',
+          jobId: 'Job ID',
+          runAt: 'Run at',
+          duration: 'Duration',
+          nextRun: 'Next run',
+          session: 'Session',
+          error: 'Error',
+          raw: 'Raw payload',
+          empty: 'No run selected',
+        },
       },
       table: {
         jobs: {
@@ -524,6 +535,7 @@ export default {
         createTitle: 'Create job',
         editTitle: 'Edit job',
         detailTitle: 'Job details',
+        runDetailTitle: 'Run details',
         footerHint: 'Jobs are written to Gateway cron storage and scheduled by the Gateway process.',
         sections: {
           basic: 'Basic',

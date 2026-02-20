@@ -89,10 +89,12 @@ const { t, locale } = useI18n()
 
 const showModal = ref(false)
 const showDetailModal = ref(false)
+const showRunDetailModal = ref(false)
 const modalMode = ref<'create' | 'edit'>('create')
 const editingJobId = ref('')
 const searchQuery = ref('')
 const statusFilter = ref<StatusFilter>('all')
+const selectedRun = ref<CronRunLogEntry | null>(null)
 
 const quickTemplatePresets = computed<CronTemplatePreset[]>(() => [
   {
@@ -544,6 +546,13 @@ const selectedJobPayloadHtml = computed(() => {
 })
 
 const orderedRuns = computed(() => [...cronStore.runs].sort((a, b) => b.ts - a.ts))
+const selectedRunRaw = computed(() => {
+  if (!selectedRun.value) return ''
+  return JSON.stringify(selectedRun.value, null, 2)
+})
+const selectedRunStatusType = computed<'success' | 'error' | 'warning' | 'default'>(() => {
+  return resolveRunStatusType(selectedRun.value?.status)
+})
 
 const stats = computed(() => {
   const total = cronStore.jobs.length
@@ -558,6 +567,21 @@ const stats = computed(() => {
     nextWakeText: nextWakeAtMs ? formatDate(nextWakeAtMs) : '-',
   }
 })
+
+function resolveRunStatusType(status?: string): 'success' | 'error' | 'warning' | 'default' {
+  if (status === 'ok') return 'success'
+  if (status === 'error') return 'error'
+  if (status === 'skipped') return 'warning'
+  return 'default'
+}
+
+function formatDurationSeconds(durationMs?: number): string {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) {
+    return '-'
+  }
+  const secondsText = (durationMs / 1000).toFixed(2).replace(/\.?0+$/, '')
+  return `${secondsText}s`
+}
 
 const previewPayload = computed(() => {
   try {
@@ -751,14 +775,7 @@ const runColumns = computed<DataTableColumns<CronRunLogEntry>>(() => [
     width: 100,
     render(row) {
       const status = row.status || 'unknown'
-      const type =
-        status === 'ok'
-          ? 'success'
-          : status === 'error'
-            ? 'error'
-            : status === 'skipped'
-              ? 'warning'
-              : 'default'
+      const type = resolveRunStatusType(status)
       return h(NTag, { size: 'small', bordered: false, type }, { default: () => status })
     },
   },
@@ -767,8 +784,7 @@ const runColumns = computed<DataTableColumns<CronRunLogEntry>>(() => [
     key: 'durationMs',
     width: 90,
     render(row) {
-      if (!row.durationMs) return '-'
-      return `${row.durationMs}ms`
+      return formatDurationSeconds(row.durationMs)
     },
   },
   {
@@ -790,7 +806,10 @@ const runColumns = computed<DataTableColumns<CronRunLogEntry>>(() => [
         {
           text: true,
           type: 'primary',
-          onClick: () => openRunSession(row),
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            openRunSession(row)
+          },
         },
         { default: () => t('pages.cron.actions.openSession') }
       )
@@ -1111,6 +1130,31 @@ function parseCronSource(text: string): { expr: string; tz?: string } {
   }
 }
 
+function parseNumberList(value: string, min: number, max: number): number[] | null {
+  if (!/^\d+(,\d+)+$/.test(value)) return null
+  const list = value
+    .split(',')
+    .map((item) => Number(item))
+    .filter((num) => Number.isInteger(num) && num >= min && num <= max)
+  if (list.length === 0) return null
+  return Array.from(new Set(list)).sort((a, b) => a - b)
+}
+
+function parseNumberRange(value: string, min: number, max: number): { start: number; end: number } | null {
+  const match = value.match(/^(\d+)-(\d+)$/)
+  if (!match) return null
+  const start = Number(match[1])
+  const end = Number(match[2])
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null
+  if (start < min || start > max || end < min || end > max || start > end) return null
+  return { start, end }
+}
+
+function isHalfHourMinuteRule(minute: string, minuteList: number[] | null): boolean {
+  if (minute.trim() === '*/30') return true
+  return !!minuteList && minuteList.length === 2 && minuteList[0] === 0 && minuteList[1] === 30
+}
+
 function formatCronAsCn(expr: string, tz?: string): string {
   const compactExpr = expr.trim().replace(/\s+/g, ' ')
   const parts = compactExpr.split(' ')
@@ -1125,9 +1169,21 @@ function formatCronAsCn(expr: string, tz?: string): string {
   const isNumber = (value: string) => /^\d+$/.test(value)
   const asNum = (value: string) => (isNumber(value) ? Number(value) : NaN)
   const pad2 = (value: number) => String(value).padStart(2, '0')
+  const minuteList = parseNumberList(minute, 0, 59)
+  const hourRange = parseNumberRange(hour, 0, 23)
+  const minuteMarks = minuteList?.map((num) => `${pad2(num)} 分`).join('、') || ''
+  const isHalfHour = isHalfHourMinuteRule(minute, minuteList)
+
+  if (isHalfHour && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return `每半小时${tzSuffix}`
+  }
 
   if (/^\*\/\d+$/.test(minute) && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
     return `每 ${minute.slice(2)} 分钟${tzSuffix}`
+  }
+
+  if (minuteList && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return `每小时的 ${minuteMarks}${tzSuffix}`
   }
 
   if (minute === '0' && /^\*\/\d+$/.test(hour) && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
@@ -1136,6 +1192,20 @@ function formatCronAsCn(expr: string, tz?: string): string {
 
   if (isNumber(minute) && /^\*\/\d+$/.test(hour) && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
     return `每 ${hour.slice(2)} 小时的 ${pad2(asNum(minute))} 分${tzSuffix}`
+  }
+
+  if (/^\*\/\d+$/.test(minute) && hourRange && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    if (isHalfHour) {
+      return `每天 ${pad2(hourRange.start)} 点到 ${pad2(hourRange.end)} 点，每半小时${tzSuffix}`
+    }
+    return `每天 ${pad2(hourRange.start)} 点到 ${pad2(hourRange.end)} 点，每 ${minute.slice(2)} 分钟${tzSuffix}`
+  }
+
+  if (minuteList && hourRange && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    if (isHalfHour) {
+      return `每天 ${pad2(hourRange.start)} 点到 ${pad2(hourRange.end)} 点，每半小时${tzSuffix}`
+    }
+    return `每天 ${pad2(hourRange.start)} 点到 ${pad2(hourRange.end)} 点，每小时的 ${minuteMarks}${tzSuffix}`
   }
 
   const weekdayMap: Record<string, string> = {
@@ -1206,12 +1276,24 @@ function formatCronAsEn(expr: string, tz?: string): string {
   const isNumber = (value: string) => /^\d+$/.test(value)
   const asNum = (value: string) => (isNumber(value) ? Number(value) : NaN)
   const pad2 = (value: number) => String(value).padStart(2, '0')
+  const minuteList = parseNumberList(minute, 0, 59)
+  const hourRange = parseNumberRange(hour, 0, 23)
+  const minuteMarks = minuteList?.map((num) => `${pad2(num)}`).join(', ') || ''
+  const isHalfHour = isHalfHourMinuteRule(minute, minuteList)
+
+  if (isHalfHour && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return `Every half hour${tzSuffix}`
+  }
 
   if (/^\*\/\d+$/.test(minute) && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
     return t('pages.cron.schedule.every', {
       value: Number(minute.slice(2)),
       unit: t('pages.cron.units.minutes'),
     }) + tzSuffix
+  }
+
+  if (minuteList && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return `Every hour at ${minuteMarks} min${tzSuffix}`
   }
 
   if (minute === '0' && /^\*\/\d+$/.test(hour) && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
@@ -1226,6 +1308,20 @@ function formatCronAsEn(expr: string, tz?: string): string {
       value: Number(hour.slice(2)),
       minute: pad2(asNum(minute)),
     }) + tzSuffix
+  }
+
+  if (/^\*\/\d+$/.test(minute) && hourRange && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    if (isHalfHour) {
+      return `Every half hour between ${pad2(hourRange.start)}:00-${pad2(hourRange.end)}:59 daily${tzSuffix}`
+    }
+    return `Every ${Number(minute.slice(2))} minutes between ${pad2(hourRange.start)}:00-${pad2(hourRange.end)}:59 daily${tzSuffix}`
+  }
+
+  if (minuteList && hourRange && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    if (isHalfHour) {
+      return `Every half hour between ${pad2(hourRange.start)}:00-${pad2(hourRange.end)}:59 daily${tzSuffix}`
+    }
+    return `Every hour at ${minuteMarks} min between ${pad2(hourRange.start)}:00-${pad2(hourRange.end)}:59 daily${tzSuffix}`
   }
 
   const weekdayMap: Record<string, string> = {
@@ -1401,6 +1497,11 @@ function openRunSession(run: CronRunLogEntry) {
   })
 }
 
+function openRunDetailModal(run: CronRunLogEntry) {
+  selectedRun.value = run
+  showRunDetailModal.value = true
+}
+
 function openDetailModal(job: CronJob) {
   showDetailModal.value = true
   void handleSelectJob(job)
@@ -1422,6 +1523,15 @@ function jobRowProps(row: CronJob) {
     style: 'cursor: pointer;',
     onClick: () => {
       void handleSelectJob(row)
+    },
+  }
+}
+
+function runRowProps(row: CronRunLogEntry) {
+  return {
+    style: 'cursor: pointer;',
+    onClick: () => {
+      openRunDetailModal(row)
     },
   }
 }
@@ -1581,9 +1691,84 @@ function jobRowProps(row: CronJob) {
         :bordered="false"
         :pagination="{ pageSize: 6 }"
         :row-key="(row: CronRunLogEntry) => `${row.jobId}-${row.ts}-${row.sessionKey || ''}`"
+        :row-props="runRowProps"
         :scroll-x="760"
       />
     </NCard>
+
+    <NModal
+      v-model:show="showRunDetailModal"
+      preset="card"
+      :title="t('pages.cron.modal.runDetailTitle')"
+      style="width: 760px; max-width: calc(100vw - 28px);"
+    >
+      <template v-if="selectedRun">
+        <div class="cron-detail-modal-shell">
+          <section class="cron-detail-hero-card">
+            <div class="cron-detail-hero-head">
+              <div style="min-width: 0;">
+                <NText strong class="cron-detail-hero-title">{{ t('pages.cron.runs.detail.summary') }}</NText>
+                <NText depth="3" class="cron-detail-desc">{{ selectedRun.summary || selectedRun.error || '-' }}</NText>
+              </div>
+              <NTag size="small" :bordered="false" round :type="selectedRunStatusType">
+                {{ selectedRun.status || 'unknown' }}
+              </NTag>
+            </div>
+
+            <div class="cron-detail-kpi-grid">
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.runs.detail.jobId') }}</NText>
+                <div class="cron-detail-value">{{ selectedRun.jobId }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.runs.detail.runAt') }}</NText>
+                <div class="cron-detail-value">{{ formatDate(selectedRun.ts) }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.runs.detail.duration') }}</NText>
+                <div class="cron-detail-value">{{ formatDurationSeconds(selectedRun.durationMs) }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.runs.detail.nextRun') }}</NText>
+                <div class="cron-detail-value">{{ selectedRun.nextRunAtMs ? formatDate(selectedRun.nextRunAtMs) : '-' }}</div>
+              </div>
+              <div class="cron-detail-kpi-card">
+                <NText depth="3">{{ t('pages.cron.runs.detail.session') }}</NText>
+                <div class="cron-detail-value">{{ selectedRun.sessionKey || '-' }}</div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="selectedRun.error" class="cron-detail-panel-card">
+            <NText depth="3">{{ t('pages.cron.runs.detail.error') }}</NText>
+            <div class="cron-detail-value cron-detail-block">{{ selectedRun.error }}</div>
+          </section>
+
+          <section class="cron-detail-panel-card">
+            <NText depth="3">{{ t('pages.cron.runs.detail.raw') }}</NText>
+            <NCode :code="selectedRunRaw" language="json" :word-wrap="true" />
+          </section>
+        </div>
+      </template>
+
+      <div v-else class="cron-empty-state">
+        {{ t('pages.cron.runs.detail.empty') }}
+      </div>
+
+      <template #footer>
+        <NSpace justify="space-between" align="center" wrap>
+          <NButton
+            size="small"
+            type="primary"
+            :disabled="!selectedRun?.sessionKey"
+            @click="selectedRun && openRunSession(selectedRun)"
+          >
+            {{ t('pages.cron.actions.openSession') }}
+          </NButton>
+          <NButton @click="showRunDetailModal = false">{{ t('common.cancel') }}</NButton>
+        </NSpace>
+      </template>
+    </NModal>
 
     <NModal
       v-model:show="showDetailModal"
