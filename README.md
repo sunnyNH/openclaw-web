@@ -38,6 +38,27 @@ OpenClaw Web 是一个基于 Vue 3 + Naive UI 的 OpenClaw Gateway 管理后台�
 - 本仓库 `main` 分支适配 OpenClaw `2026.02.14` 及以上版本。
 - 如果使用的是 OpenClaw `2026.02.13` 版本以及之前的版本，请使用 `openclaw-26.02.13` tag。
 
+### 2026.02.14+ 设备鉴权说明（必读）
+
+OpenClaw `2026.02.14` 及以上版本默认启用 `devices` 配对鉴权。  
+首次使用 OpenClaw Web 连接 Gateway 时，如果页面提示 `disconnected (1008): pairing required`，请先在 **Gateway 所在机器** 执行以下命令批准设备：
+
+```bash
+openclaw devices list
+openclaw devices approve <requestId>
+```
+
+也可以直接批准最新一条待审批请求：
+
+```bash
+openclaw devices approve --latest
+```
+
+批准后刷新页面或重新连接即可。  
+官方文档参考：
+- https://docs.openclaw.ai/docs/reference/cli/devices
+- https://docs.openclaw.ai/docs/reference/control-ui/authentication
+
 ## 快速开始
 
 ### 1. 安装依赖
