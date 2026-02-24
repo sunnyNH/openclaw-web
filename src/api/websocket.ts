@@ -35,8 +35,8 @@ export class OpenClawWebSocket {
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private challengeTimer: ReturnType<typeof setTimeout> | null = null
   private connectTimer: ReturnType<typeof setTimeout> | null = null
-  private connectSendTimer: ReturnType<typeof setTimeout> | null = null
   private pendingConnectId: string | null = null
   private connectNonce: string | null = null
   private connectSent = false
@@ -127,25 +127,14 @@ export class OpenClawWebSocket {
     })
   }
 
-  private queueConnectSend(): void {
-    if (this.connectSendTimer) {
-      clearTimeout(this.connectSendTimer)
-    }
-    this.connectSendTimer = setTimeout(() => {
-      void this.sendConnect()
-    }, 750)
-  }
-
   private async sendConnect(): Promise<void> {
     if (this.connectSent) return
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     if (!this.pendingConnectId) return
+    if (!this.connectNonce) return
 
     this.connectSent = true
-    if (this.connectSendTimer) {
-      clearTimeout(this.connectSendTimer)
-      this.connectSendTimer = null
-    }
+    this.clearChallengeTimeout()
 
     try {
       const connectFrame: RPCFrame = {
@@ -158,11 +147,19 @@ export class OpenClawWebSocket {
       this.startConnectTimeout()
     } catch (e) {
       const locale = getActiveLocale()
-      const reason = byLocale(
-        `Gateway connect 参数构造失败: ${(e as Error)?.message || 'unknown error'}`,
-        `Failed to build Gateway connect params: ${(e as Error)?.message || 'unknown error'}`,
-        locale,
-      )
+      const errorMessage = (e as Error)?.message || 'unknown error'
+      const isSecureContextError = /crypto\.subtle|secure context/i.test(errorMessage)
+      const reason = isSecureContextError
+        ? byLocale(
+            '设备签名需要安全上下文（HTTPS 或 localhost）',
+            'Device auth requires a secure context (HTTPS or localhost).',
+            locale,
+          )
+        : byLocale(
+            `Gateway connect 参数构造失败: ${errorMessage}`,
+            `Failed to build Gateway connect params: ${errorMessage}`,
+            locale,
+          )
       this.pendingConnectId = null
       this.setState(ConnectionState.FAILED)
       this.emit('error', reason)
@@ -180,8 +177,8 @@ export class OpenClawWebSocket {
         this.pendingConnectId = connectId
         this.connectNonce = null
         this.connectSent = false
-        // 远程连接需要先拿到 connect.challenge 的 nonce 再签名 connect；同时做一个兜底定时器，避免事件丢失导致卡死
-        this.queueConnectSend()
+        // connect.challenge nonce 是 v2 设备签名握手必需
+        this.startChallengeTimeout()
       }
 
       this.ws.onmessage = (event: MessageEvent) => {
@@ -230,9 +227,10 @@ export class OpenClawWebSocket {
       const evt = frame as RPCEvent
       if (evt.event === 'connect.challenge') {
         const payload = evt.payload as { nonce?: unknown } | undefined
-        const nonce = payload && typeof payload.nonce === 'string' ? payload.nonce : null
-        if (nonce) {
+        const nonce = payload && typeof payload.nonce === 'string' ? payload.nonce.trim() : ''
+        if (nonce && !this.connectSent) {
           this.connectNonce = nonce
+          this.clearChallengeTimeout()
           void this.sendConnect()
         }
       }
@@ -279,6 +277,31 @@ export class OpenClawWebSocket {
     this.safeClose(4001, reason)
   }
 
+  private startChallengeTimeout(): void {
+    if (this.challengeTimer) {
+      clearTimeout(this.challengeTimer)
+    }
+    this.challengeTimer = setTimeout(() => {
+      if (!this.pendingConnectId || this.connectSent) return
+      this.pendingConnectId = null
+      const reason = byLocale(
+        '未收到 Gateway connect.challenge，无法开始设备签名握手，请检查网关地址/网络/代理',
+        'Missing Gateway connect.challenge. Cannot start device-auth handshake. Check gateway URL/network/proxy.',
+        getActiveLocale(),
+      )
+      this.setState(ConnectionState.FAILED)
+      this.emit('error', reason)
+      this.emit('failed', reason)
+      this.safeClose(4002, reason)
+    }, 10000)
+  }
+
+  private clearChallengeTimeout(): void {
+    if (!this.challengeTimer) return
+    clearTimeout(this.challengeTimer)
+    this.challengeTimer = null
+  }
+
   private startConnectTimeout(): void {
     if (this.connectTimer) {
       clearTimeout(this.connectTimer)
@@ -290,7 +313,7 @@ export class OpenClawWebSocket {
       this.setState(ConnectionState.FAILED)
       this.emit('error', reason)
       this.emit('failed', reason)
-      this.safeClose(4002, reason)
+      this.safeClose(4003, reason)
     }, 10000)
   }
 
@@ -459,10 +482,7 @@ export class OpenClawWebSocket {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
     }
-    if (this.connectSendTimer) {
-      clearTimeout(this.connectSendTimer)
-      this.connectSendTimer = null
-    }
+    this.clearChallengeTimeout()
     if (this.connectTimer) {
       clearTimeout(this.connectTimer)
       this.connectTimer = null

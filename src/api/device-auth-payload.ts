@@ -12,6 +12,9 @@ export type DeviceAuthPayloadParams = {
 
 export function buildDeviceAuthPayload(params: DeviceAuthPayloadParams): string {
   const version = params.version ?? (params.nonce ? 'v2' : 'v1')
+  if (version === 'v2' && !params.nonce) {
+    throw new Error('v2 device-auth payload requires a non-empty nonce')
+  }
   const scopes = params.scopes.join(',')
   const token = params.token ?? ''
   const base = [

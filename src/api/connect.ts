@@ -23,7 +23,7 @@ export interface ConnectParams {
     publicKey: string
     signature: string
     signedAt: number
-    nonce?: string
+    nonce: string
   }
   auth: {
     token: string
@@ -58,7 +58,7 @@ function getClientUserAgent(): string | undefined {
   return navigator.userAgent || undefined
 }
 
-export function buildConnectParamsLegacy(token: string): ConnectParams {
+function buildBaseConnectParams(token: string): ConnectParams {
   return {
     minProtocol: DEFAULT_MIN_PROTOCOL,
     maxProtocol: DEFAULT_MAX_PROTOCOL,
@@ -87,32 +87,32 @@ export async function buildConnectParams(
   token: string,
   opts?: { nonce?: string | null },
 ): Promise<ConnectParams> {
-  const params = buildConnectParamsLegacy(token)
+  const params = buildBaseConnectParams(token)
   const nonce = typeof opts?.nonce === 'string' ? opts.nonce.trim() : ''
 
-  try {
-    const deviceIdentity = await loadOrCreateDeviceIdentity()
-    const signedAtMs = Date.now()
-    const payload = buildDeviceAuthPayload({
-      deviceId: deviceIdentity.deviceId,
-      clientId: params.client.id,
-      clientMode: params.client.mode,
-      role: params.role,
-      scopes: params.scopes,
-      signedAtMs,
-      token: params.auth.token ?? null,
-      nonce: nonce || null,
-    })
-    const signature = await signDevicePayload(deviceIdentity.privateKey, payload)
-    params.device = {
-      id: deviceIdentity.deviceId,
-      publicKey: deviceIdentity.publicKey,
-      signature,
-      signedAt: signedAtMs,
-      ...(nonce ? { nonce } : {}),
-    }
-  } catch {
-    // 非安全上下文或设备身份生成失败时：回退为 legacy connect（兼容旧 Gateway，但在 v2026.2.14+ 会被清空 scopes）
+  if (!nonce) {
+    throw new Error('missing connect.challenge nonce')
+  }
+
+  const deviceIdentity = await loadOrCreateDeviceIdentity()
+  const signedAtMs = Date.now()
+  const payload = buildDeviceAuthPayload({
+    deviceId: deviceIdentity.deviceId,
+    clientId: params.client.id,
+    clientMode: params.client.mode,
+    role: params.role,
+    scopes: params.scopes,
+    signedAtMs,
+    token: params.auth.token ?? null,
+    nonce,
+  })
+  const signature = await signDevicePayload(deviceIdentity.privateKey, payload)
+  params.device = {
+    id: deviceIdentity.deviceId,
+    publicKey: deviceIdentity.publicKey,
+    signature,
+    signedAt: signedAtMs,
+    nonce,
   }
 
   return params
