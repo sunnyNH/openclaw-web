@@ -50,6 +50,9 @@ openclaw devices list
 openclaw devices approve <requestId>
 ```
 
+> Note: device auth requires a secure browser context (`crypto.subtle`). Use **HTTPS** for the frontend, or access it via `localhost/127.0.0.1`.  
+> If you open the frontend via `http://<LAN-IP>`, browsers typically disable `crypto.subtle`, and the device-auth handshake will fail.
+
 If the CLI fails with `SECURITY ERROR: Gateway URL "ws://..." uses plaintext ws:// to a non-loopback address` (common when the Gateway binds to LAN and you connect via a private IP), run the commands on the Gateway host with a loopback URL and an explicit token:
 
 ```bash
@@ -69,6 +72,29 @@ After approval, refresh the page or reconnect.
 Official docs:
 - <https://docs.openclaw.ai/docs/reference/cli/devices>
 - <https://docs.openclaw.ai/docs/reference/control-ui/authentication>
+
+### Non-loopback Control UI Requires allowedOrigins for 2026.02.23+ (Must Read)
+
+OpenClaw `2026.02.23` and later: when the Gateway is bound to a non-loopback address (for example `gateway.bind=lan` / `custom` / `tailnet`) and Control UI is enabled (`gateway.controlUi.enabled=true`), you must set `gateway.controlUi.allowedOrigins` (full origins including scheme/host/port, without path). Otherwise the Gateway will fail closed on startup or reject browser connections.
+
+Example:
+
+```json
+{
+  "gateway": {
+    "bind": "lan",
+    "controlUi": {
+      "enabled": true,
+      "allowedOrigins": [
+        "http://localhost:3001",
+        "https://your-domain"
+      ]
+    }
+  }
+}
+```
+
+Not recommended but available as a temporary fallback: `gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=true`.
 
 ## Quick Start
 

@@ -50,6 +50,9 @@ openclaw devices list
 openclaw devices approve <requestId>
 ```
 
+> 注意：设备签名依赖浏览器安全上下文（`crypto.subtle`）。请使用 **HTTPS** 部署前端，或在本机通过 `localhost/127.0.0.1` 访问。  
+> 如果你通过 `http://<内网IP>` 访问前端页面，浏览器通常会禁用 `crypto.subtle`，导致无法完成设备签名握手。
+
 如果 CLI 报错 `SECURITY ERROR: Gateway URL "ws://..." uses plaintext ws:// to a non-loopback address`（常见于将 Gateway 绑定到 LAN 并使用内网 IP 直连），建议在 **Gateway 所在机器** 使用 loopback 地址并显式传入 token：
 
 ```bash
@@ -69,6 +72,29 @@ openclaw devices approve --latest
 官方文档参考：
 - https://docs.openclaw.ai/docs/reference/cli/devices
 - https://docs.openclaw.ai/docs/reference/control-ui/authentication
+
+### 2026.02.23+ 非 loopback 部署必配 allowedOrigins（必读）
+
+OpenClaw `2026.02.23` 及以上版本：如果 Gateway 绑定到非 loopback（例如 `gateway.bind=lan` / `custom` / `tailnet`）并且启用了 Control UI（`gateway.controlUi.enabled=true`），必须显式配置 `gateway.controlUi.allowedOrigins`（**完整 origin**，含协议/域名/端口；不含路径），否则 Gateway 会启动失败或拒绝浏览器连接。
+
+配置示例：
+
+```json
+{
+  "gateway": {
+    "bind": "lan",
+    "controlUi": {
+      "enabled": true,
+      "allowedOrigins": [
+        "http://localhost:3001",
+        "https://你的域名"
+      ]
+    }
+  }
+}
+```
+
+不建议但可临时兜底：`gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=true`。
 
 ## 快速开始
 
